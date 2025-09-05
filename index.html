@@ -18,7 +18,6 @@
     .btn:disabled{ opacity:.5; cursor:not-allowed; }
     .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
     .pill { border-radius:999px; padding:6px 12px; font-weight:700; }
-    .dot { width:14px; height:14px; border-radius:50%; display:inline-block; margin-right:8px; vertical-align:middle; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     .meter { height:12px; background:#1f2937; border-radius:999px; overflow:hidden; }
     .meter > div { height:100%; background:linear-gradient(90deg, var(--bad), var(--warn), var(--ok)); width:0%; transition:width .15s linear; }
@@ -33,10 +32,10 @@
 <body>
   <div class="wrap">
     <h1>Blur‑Guard MVP (Web + PWA)</h1>
-    <p class="hint">Mobile‑web app that only <b>accepts sharp photos</b>. Works offline once installed. Analyzes on‑device; no backend.</p>
+    <p class="hint">Mobile‑web app that only <b>accepts sharp photos</b>. Works offline once installed. On‑device analysis; no backend.</p>
 
     <div id="iosBanner" class="banner" style="display:none">
-      <b>Tip (iPhone):</b> For the best experience, tap <b>Share</b> → <b>Add to Home Screen</b>, then open from the Home Screen.
+      <b>Tip (iPhone):</b> Share → <b>Add to Home Screen</b>, then open from the icon for best camera behavior.
     </div>
 
     <div class="grid">
@@ -86,16 +85,17 @@
       </div>
     </details>
 
-    <p class="footer">Deploy anywhere with HTTPS (GitHub Pages, Vercel, Netlify, Cloudflare). Mobile browsers require HTTPS for camera access.</p>
+    <p class="footer">Serve via <b>HTTPS</b> (or <code>http://localhost</code>) or camera will be blocked.</p>
   </div>
 
 <script>
+// --- PWA bits: manifest + service worker in one file ---
 (function(){
-  // --- PWA: dynamic manifest + service worker (works from single file) ---
   const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
-  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+  const isStandalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
   if(isIOS && !isStandalone){ document.getElementById('iosBanner').style.display='block'; }
 
+  // Minimal generated icon + manifest
   function makeIcon(size){
     const c=document.createElement('canvas'); c.width=c.height=size; const g=c.getContext('2d');
     g.fillStyle='#0f172a'; g.fillRect(0,0,size,size);
@@ -105,28 +105,18 @@
   }
   const manifest = { name:'Blur‑Guard', short_name:'BlurGuard', start_url:'.', display:'standalone', background_color:'#0b1020', theme_color:'#0b1020',
     icons:[{src:makeIcon(192),sizes:'192x192',type:'image/png'},{src:makeIcon(512),sizes:'512x512',type:'image/png'}] };
-  const manBlob = new Blob([JSON.stringify(manifest)], {type:'application/json'});
-  const manUrl = URL.createObjectURL(manBlob);
+  const manUrl = URL.createObjectURL(new Blob([JSON.stringify(manifest)], {type:'application/json'}));
   const mlink = document.createElement('link'); mlink.rel='manifest'; mlink.href=manUrl; document.head.appendChild(mlink);
 
   if('serviceWorker' in navigator){
-    const swCode = `
-      self.addEventListener('install', e => {
-        e.waitUntil(caches.open('blur-guard-v1').then(c => c.addAll(['./'])));
-        self.skipWaiting();
-      });
-      self.addEventListener('activate', e => self.clients.claim());
-      self.addEventListener('fetch', e => {
-        e.respondWith(
-          fetch(e.request).catch(()=>caches.match(e.request).then(r=> r || caches.match('./')))
-        );
-      });`;
-    const swBlob = new Blob([swCode], {type:'text/javascript'});
-    const swUrl = URL.createObjectURL(swBlob);
+    const swCode = `self.addEventListener('install',e=>{e.waitUntil(caches.open('blur-guard-v1').then(c=>c.addAll(['./'])));self.skipWaiting();});
+self.addEventListener('activate',e=>self.clients.claim());
+self.addEventListener('fetch',e=>{e.respondWith(fetch(e.request).catch(()=>caches.match(e.request).then(r=>r||caches.match('./'))))});`;
+    const swUrl = URL.createObjectURL(new Blob([swCode], {type:'text/javascript'}));
     navigator.serviceWorker.register(swUrl).catch(()=>{});
   }
 
-  // Install prompt (Android/Chrome)
+  // Install prompt on Android/Chrome
   let deferredPrompt=null; const installBtn=document.getElementById('installBtn');
   window.addEventListener('beforeinstallprompt', (e)=>{ e.preventDefault(); deferredPrompt=e; installBtn.style.display='inline-block'; });
   installBtn.onclick = async ()=>{ if(!deferredPrompt) return; deferredPrompt.prompt(); await deferredPrompt.userChoice; installBtn.style.display='none'; };
@@ -134,10 +124,11 @@
 </script>
 
 <script>
+// --- Main app logic ---
 (function(){
   const video = document.getElementById('video');
-  const work = document.getElementById('work'); // small analysis canvas
-  const full = document.getElementById('full'); // full-res capture
+  const work = document.getElementById('work');
+  const full = document.getElementById('full');
   const startBtn = document.getElementById('startBtn');
   const snapBtn = document.getElementById('snapBtn');
   const nextBtn = document.getElementById('nextBtn');
@@ -155,20 +146,25 @@
   const fileInput = document.getElementById('fileInput');
   const fallbackBtn = document.getElementById('fallbackBtn');
 
-  let stream = null, timer = null, lastSharpTs = 0, accepting = true;
+  let stream=null, timer=null, lastSharpTs=0, accepting=true;
 
   startBtn.onclick = async () => {
     try {
       startBtn.disabled = true;
-      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } }, audio:false });
+      // Works only on HTTPS or http://localhost
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } },
+        audio: false
+      });
       video.srcObject = stream;
       await video.play();
       snapBtn.disabled = false;
       status('analyzing…', '#f59e0b');
       startLoop();
     } catch (e) {
-      alert('Camera error: '+e.message+'
-Try using HTTPS or allow camera permissions.');
+      alert(`Camera error: ${e.message}
+Use HTTPS (or localhost) and allow camera permissions. If in an in‑app browser, open in Chrome/Safari.`);
+      console.error('getUserMedia failed:', e);
       startBtn.disabled = false;
     }
   };
@@ -178,10 +174,9 @@ Try using HTTPS or allow camera permissions.');
   fallbackBtn.onclick = () => fileInput.click();
   fileInput.onchange = async (e)=>{
     const f = e.target.files && e.target.files[0]; if(!f) return;
-    const blob = f;
-    const ok = await validateBlob(blob);
+    const ok = await validateBlob(f);
     if(!ok){ alert('Too blurry — please retake.'); return; }
-    addThumb(blob); nextBtn.disabled = false;
+    addThumb(f); nextBtn.disabled = false;
   };
 
   function startLoop(){ if(timer) clearInterval(timer); timer = setInterval(tick, +tickMs.value || 150); }
@@ -199,7 +194,7 @@ Try using HTTPS or allow camera permissions.');
     g.drawImage(video, 0, 0, nw, nh);
     const img = g.getImageData(0,0,nw,nh);
 
-    const gray = toGray(img.data); // Uint8
+    const gray = toGray(img.data);
     const vol = varianceOfLaplacian(gray, nw, nh);
     const ten = tenengrad(gray, nw, nh);
 
@@ -219,7 +214,7 @@ Try using HTTPS or allow camera permissions.');
         const msStable = +stableMs.value || 400;
         if(lastSharpTs === 0) lastSharpTs = performance.now();
         else if(performance.now() - lastSharpTs >= msStable){
-          accepting = false; // avoid double fires
+          accepting = false;
           await autoCapture();
           setTimeout(()=>{ accepting = true; lastSharpTs = 0; }, 600);
         }
@@ -270,7 +265,7 @@ Try using HTTPS or allow camera permissions.');
 
   async function validateBlob(blob){
     const bmp = await createImageBitmap(blob);
-    const maxSide = 512; // analysis size
+    const maxSide = 512;
     const scale = Math.max(bmp.width, bmp.height)/maxSide;
     const nw = Math.max(1, Math.round(bmp.width/scale));
     const nh = Math.max(1, Math.round(bmp.height/scale));
@@ -302,7 +297,7 @@ Try using HTTPS or allow camera permissions.');
 
   function tenengrad(gray, w, h){ const sx=[-1,0,1,-2,0,2,-1,0,1]; const sy=[-1,-2,-1,0,0,0,1,2,1]; let sum=0, n=0; for(let y=1;y<h-1;y++){ for(let x=1;x<w-1;x++){ let gx=0, gy=0, ki=0; for(let dy=-1; dy<=1; dy++){ const row=(y+dy)*w; for(let dx=-1; dx<=1; dx++){ const p = gray[row + (x+dx)]; gx += p * sx[ki]; gy += p * sy[ki]; ki++; } } const g2 = gx*gx + gy*gy; sum += g2; n++; } } return sum/n; }
 
-  // Rolling z-score stats per metric
+  // Rolling z-score stats per metric (Welford)
   const volStats = { n:0, mean:0, m2:0 };
   const tenStats = { n:0, mean:0, m2:0 };
   function zscore(stats, x){ stats.n++; const d = x - stats.mean; stats.mean += d / stats.n; const d2 = x - stats.mean; stats.m2 += d * d2; const v = (stats.n>1) ? (stats.m2 / (stats.n-1)) : 1e-6; const sd = Math.sqrt(Math.max(v, 1e-6)); return (x - stats.mean) / sd; }
@@ -330,7 +325,6 @@ Try using HTTPS or allow camera permissions.');
     .btn:disabled{ opacity:.5; cursor:not-allowed; }
     .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
     .pill { border-radius:999px; padding:6px 12px; font-weight:700; }
-    .dot { width:14px; height:14px; border-radius:50%; display:inline-block; margin-right:8px; vertical-align:middle; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     .meter { height:12px; background:#1f2937; border-radius:999px; overflow:hidden; }
     .meter > div { height:100%; background:linear-gradient(90deg, var(--bad), var(--warn), var(--ok)); width:0%; transition:width .15s linear; }
@@ -345,10 +339,10 @@ Try using HTTPS or allow camera permissions.');
 <body>
   <div class="wrap">
     <h1>Blur‑Guard MVP (Web + PWA)</h1>
-    <p class="hint">Mobile‑web app that only <b>accepts sharp photos</b>. Works offline once installed. Analyzes on‑device; no backend.</p>
+    <p class="hint">Mobile‑web app that only <b>accepts sharp photos</b>. Works offline once installed. On‑device analysis; no backend.</p>
 
     <div id="iosBanner" class="banner" style="display:none">
-      <b>Tip (iPhone):</b> For the best experience, tap <b>Share</b> → <b>Add to Home Screen</b>, then open from the Home Screen.
+      <b>Tip (iPhone):</b> Share → <b>Add to Home Screen</b>, then open from the icon for best camera behavior.
     </div>
 
     <div class="grid">
@@ -398,16 +392,17 @@ Try using HTTPS or allow camera permissions.');
       </div>
     </details>
 
-    <p class="footer">Deploy anywhere with HTTPS (GitHub Pages, Vercel, Netlify, Cloudflare). Mobile browsers require HTTPS for camera access.</p>
+    <p class="footer">Serve via <b>HTTPS</b> (or <code>http://localhost</code>) or camera will be blocked.</p>
   </div>
 
 <script>
+// --- PWA bits: manifest + service worker in one file ---
 (function(){
-  // --- PWA: dynamic manifest + service worker (works from single file) ---
   const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
-  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+  const isStandalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
   if(isIOS && !isStandalone){ document.getElementById('iosBanner').style.display='block'; }
 
+  // Minimal generated icon + manifest
   function makeIcon(size){
     const c=document.createElement('canvas'); c.width=c.height=size; const g=c.getContext('2d');
     g.fillStyle='#0f172a'; g.fillRect(0,0,size,size);
@@ -417,28 +412,18 @@ Try using HTTPS or allow camera permissions.');
   }
   const manifest = { name:'Blur‑Guard', short_name:'BlurGuard', start_url:'.', display:'standalone', background_color:'#0b1020', theme_color:'#0b1020',
     icons:[{src:makeIcon(192),sizes:'192x192',type:'image/png'},{src:makeIcon(512),sizes:'512x512',type:'image/png'}] };
-  const manBlob = new Blob([JSON.stringify(manifest)], {type:'application/json'});
-  const manUrl = URL.createObjectURL(manBlob);
+  const manUrl = URL.createObjectURL(new Blob([JSON.stringify(manifest)], {type:'application/json'}));
   const mlink = document.createElement('link'); mlink.rel='manifest'; mlink.href=manUrl; document.head.appendChild(mlink);
 
   if('serviceWorker' in navigator){
-    const swCode = `
-      self.addEventListener('install', e => {
-        e.waitUntil(caches.open('blur-guard-v1').then(c => c.addAll(['./'])));
-        self.skipWaiting();
-      });
-      self.addEventListener('activate', e => self.clients.claim());
-      self.addEventListener('fetch', e => {
-        e.respondWith(
-          fetch(e.request).catch(()=>caches.match(e.request).then(r=> r || caches.match('./')))
-        );
-      });`;
-    const swBlob = new Blob([swCode], {type:'text/javascript'});
-    const swUrl = URL.createObjectURL(swBlob);
+    const swCode = `self.addEventListener('install',e=>{e.waitUntil(caches.open('blur-guard-v1').then(c=>c.addAll(['./'])));self.skipWaiting();});
+self.addEventListener('activate',e=>self.clients.claim());
+self.addEventListener('fetch',e=>{e.respondWith(fetch(e.request).catch(()=>caches.match(e.request).then(r=>r||caches.match('./'))))});`;
+    const swUrl = URL.createObjectURL(new Blob([swCode], {type:'text/javascript'}));
     navigator.serviceWorker.register(swUrl).catch(()=>{});
   }
 
-  // Install prompt (Android/Chrome)
+  // Install prompt on Android/Chrome
   let deferredPrompt=null; const installBtn=document.getElementById('installBtn');
   window.addEventListener('beforeinstallprompt', (e)=>{ e.preventDefault(); deferredPrompt=e; installBtn.style.display='inline-block'; });
   installBtn.onclick = async ()=>{ if(!deferredPrompt) return; deferredPrompt.prompt(); await deferredPrompt.userChoice; installBtn.style.display='none'; };
@@ -446,10 +431,11 @@ Try using HTTPS or allow camera permissions.');
 </script>
 
 <script>
+// --- Main app logic ---
 (function(){
   const video = document.getElementById('video');
-  const work = document.getElementById('work'); // small analysis canvas
-  const full = document.getElementById('full'); // full-res capture
+  const work = document.getElementById('work');
+  const full = document.getElementById('full');
   const startBtn = document.getElementById('startBtn');
   const snapBtn = document.getElementById('snapBtn');
   const nextBtn = document.getElementById('nextBtn');
@@ -467,20 +453,25 @@ Try using HTTPS or allow camera permissions.');
   const fileInput = document.getElementById('fileInput');
   const fallbackBtn = document.getElementById('fallbackBtn');
 
-  let stream = null, timer = null, lastSharpTs = 0, accepting = true;
+  let stream=null, timer=null, lastSharpTs=0, accepting=true;
 
   startBtn.onclick = async () => {
     try {
       startBtn.disabled = true;
-      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } }, audio:false });
+      // Works only on HTTPS or http://localhost
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } },
+        audio: false
+      });
       video.srcObject = stream;
       await video.play();
       snapBtn.disabled = false;
       status('analyzing…', '#f59e0b');
       startLoop();
     } catch (e) {
-      alert('Camera error: '+e.message+'
-Try using HTTPS or allow camera permissions.');
+      alert(`Camera error: ${e.message}
+Use HTTPS (or localhost) and allow camera permissions. If in an in‑app browser, open in Chrome/Safari.`);
+      console.error('getUserMedia failed:', e);
       startBtn.disabled = false;
     }
   };
@@ -490,10 +481,9 @@ Try using HTTPS or allow camera permissions.');
   fallbackBtn.onclick = () => fileInput.click();
   fileInput.onchange = async (e)=>{
     const f = e.target.files && e.target.files[0]; if(!f) return;
-    const blob = f;
-    const ok = await validateBlob(blob);
+    const ok = await validateBlob(f);
     if(!ok){ alert('Too blurry — please retake.'); return; }
-    addThumb(blob); nextBtn.disabled = false;
+    addThumb(f); nextBtn.disabled = false;
   };
 
   function startLoop(){ if(timer) clearInterval(timer); timer = setInterval(tick, +tickMs.value || 150); }
@@ -511,7 +501,7 @@ Try using HTTPS or allow camera permissions.');
     g.drawImage(video, 0, 0, nw, nh);
     const img = g.getImageData(0,0,nw,nh);
 
-    const gray = toGray(img.data); // Uint8
+    const gray = toGray(img.data);
     const vol = varianceOfLaplacian(gray, nw, nh);
     const ten = tenengrad(gray, nw, nh);
 
@@ -531,7 +521,7 @@ Try using HTTPS or allow camera permissions.');
         const msStable = +stableMs.value || 400;
         if(lastSharpTs === 0) lastSharpTs = performance.now();
         else if(performance.now() - lastSharpTs >= msStable){
-          accepting = false; // avoid double fires
+          accepting = false;
           await autoCapture();
           setTimeout(()=>{ accepting = true; lastSharpTs = 0; }, 600);
         }
@@ -582,7 +572,7 @@ Try using HTTPS or allow camera permissions.');
 
   async function validateBlob(blob){
     const bmp = await createImageBitmap(blob);
-    const maxSide = 512; // analysis size
+    const maxSide = 512;
     const scale = Math.max(bmp.width, bmp.height)/maxSide;
     const nw = Math.max(1, Math.round(bmp.width/scale));
     const nh = Math.max(1, Math.round(bmp.height/scale));
@@ -614,7 +604,7 @@ Try using HTTPS or allow camera permissions.');
 
   function tenengrad(gray, w, h){ const sx=[-1,0,1,-2,0,2,-1,0,1]; const sy=[-1,-2,-1,0,0,0,1,2,1]; let sum=0, n=0; for(let y=1;y<h-1;y++){ for(let x=1;x<w-1;x++){ let gx=0, gy=0, ki=0; for(let dy=-1; dy<=1; dy++){ const row=(y+dy)*w; for(let dx=-1; dx<=1; dx++){ const p = gray[row + (x+dx)]; gx += p * sx[ki]; gy += p * sy[ki]; ki++; } } const g2 = gx*gx + gy*gy; sum += g2; n++; } } return sum/n; }
 
-  // Rolling z-score stats per metric
+  // Rolling z-score stats per metric (Welford)
   const volStats = { n:0, mean:0, m2:0 };
   const tenStats = { n:0, mean:0, m2:0 };
   function zscore(stats, x){ stats.n++; const d = x - stats.mean; stats.mean += d / stats.n; const d2 = x - stats.mean; stats.m2 += d * d2; const v = (stats.n>1) ? (stats.m2 / (stats.n-1)) : 1e-6; const sd = Math.sqrt(Math.max(v, 1e-6)); return (x - stats.mean) / sd; }
