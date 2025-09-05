@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Blur-Guard MVP (Doc Scanner PWA)</title>
+  <title>Doc‑Scan MVP (PWA, OpenCV.js)</title>
   <meta name="theme-color" content="#0b1020" />
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -33,8 +33,8 @@
 </head>
 <body>
   <div class="wrap">
-    <h1>Blur-Guard MVP (Document Scanner)</h1>
-    <p class="hint">Accepts only when <b>sharpness</b>, <b>exposure</b>, <b>glare</b>, <b>coverage 80–90%</b>, <b>all 4 edges visible</b>, and <b>reasonable skew</b> pass. Works offline once installed.</p>
+    <h1>Doc‑Scan MVP</h1>
+    <p class="hint">On‑device checks with OpenCV.js: <b>blur</b>, <b>exposure</b>, <b>glare</b>, <b>single‑page detection</b>, <b>coverage 80–90%</b>, <b>all 4 edges visible</b>, <b>skew</b>, <b>aspect ratio</b>. Installable PWA; offline after first load.</p>
 
     <div id="iosBanner" class="banner" style="display:none">
       <b>Tip (iPhone):</b> Share → <b>Add to Home Screen</b> for best camera behavior.
@@ -51,14 +51,14 @@
           <button id="fallbackBtn" class="btn" style="background:#6b7280">Upload (fallback)</button>
         </div>
         <div class="row" style="margin-top:10px">
-          <span id="statusPill" class="pill" style="background:#1f2937">status: <span id="statusTxt">idle</span></span>
-          <span class="pill" style="background:#111827">score: <span id="scoreTxt" class="mono">—</span></span>
+          <span id="statusPill" class="pill" style="background:#1f2937">status: <span id="statusTxt">loading OpenCV…</span></span>
+          <span class="pill" style="background:#111827">sharp: <span id="scoreTxt" class="mono">—</span></span>
           <span class="pill" style="background:#111827">coverage: <span id="covTxt" class="mono">—</span></span>
           <span class="pill" style="background:#111827">mode: <span id="modeTxt" class="mono">manual</span></span>
         </div>
 
         <div style="margin-top:12px" class="meter"><div id="meterFill"></div></div>
-        <div class="footer">Green = sharper. Dashed outer box is ~85% target; inner dashed frame = required margin. Page outline turns green only when all checks pass.</div>
+        <div class="footer">Dashed frame ≈ target size (~85%). Green outline tracks the detected page.</div>
 
         <div class="overlayWrap">
           <video id="video" autoplay playsinline muted style="width:100%; border-radius:12px; background:black"></video>
@@ -78,64 +78,42 @@
     <details class="card" style="margin-top:16px">
       <summary><b>Settings</b></summary>
       <div class="row" style="margin-top:10px">
-        <label>Analysis max side: <input id="dsInput" type="number" value="256" class="mono" style="width:90px"></label>
-        <label>Stable ms (auto): <input id="stableMs" type="number" value="400" class="mono" style="width:90px"></label>
-        <label>Frame interval ms: <input id="tickMs" type="number" value="150" class="mono" style="width:110px"></label>
+        <label>Analysis max side: <input id="dsInput" type="number" value="320" class="mono" style="width:90px"></label>
+        <label>Frame interval ms: <input id="tickMs" type="number" value="120" class="mono" style="width:110px"></label>
+        <label>Blur (VoL &gt;): <input id="volTh" type="number" value="120" class="mono" style="width:70px"></label>
+        <label>Tenengrad &gt; <input id="tenTh" type="number" value="8" class="mono" style="width:70px"></label>
       </div>
       <div class="row" style="margin-top:10px">
-        <label>Blur thresholds (512px equiv):</label>
-        <span class="pill" style="background:#111827">VoL &gt; <input id="volTh" type="number" value="120" class="mono" style="width:70px"></span>
-        <span class="pill" style="background:#111827">Tenengrad &gt; <input id="tenTh" type="number" value="8" class="mono" style="width:70px"></span>
-      </div>
-      <div class="row" style="margin-top:10px">
-        <span class="pill" style="background:#111827">Min coverage: <input id="covMinTh" type="number" value="0.80" step="0.05" class="mono" style="width:90px"></span>
-        <span class="pill" style="background:#111827">Max coverage: <input id="covMaxTh" type="number" value="0.90" step="0.05" class="mono" style="width:90px"></span>
-        <span class="pill" style="background:#111827">Min edge margin %: <input id="marginTh" type="number" value="0.02" step="0.01" class="mono" style="width:120px"></span>
+        <span class="pill" style="background:#111827">Coverage min: <input id="covMinTh" type="number" value="0.80" step="0.05" class="mono" style="width:80px"></span>
+        <span class="pill" style="background:#111827">Coverage max: <input id="covMaxTh" type="number" value="0.90" step="0.05" class="mono" style="width:80px"></span>
+        <span class="pill" style="background:#111827">Min edge margin %: <input id="marginTh" type="number" value="0.02" step="0.01" class="mono" style="width:90px"></span>
         <span class="pill" style="background:#111827">Max skew (°): <input id="skewTh" type="number" value="12" class="mono" style="width:80px"></span>
-        <span class="pill" style="background:#111827">Glare max area: <input id="glareTh" type="number" value="0.03" step="0.01" class="mono" style="width:100px"></span>
+        <span class="pill" style="background:#111827">Glare max area: <input id="glareTh" type="number" value="0.03" step="0.01" class="mono" style="width:80px"></span>
+        <span class="pill" style="background:#111827">Aspect (long/short): <input id="arMin" type="number" value="1.30" step="0.05" class="mono" style="width:80px">–<input id="arMax" type="number" value="1.55" step="0.05" class="mono" style="width:80px"></span>
       </div>
     </details>
 
     <p class="footer">Use <b>HTTPS</b> (or <code>http://localhost</code>) for camera access.</p>
   </div>
 
+<!-- OpenCV.js from official CDN (cached by PWA after first visit) -->
+<script async src="https://docs.opencv.org/4.x/opencv.js" onload="cv && (cv['onRuntimeInitialized']=()=>window.__cvReady=1)" onerror="console.error('OpenCV failed to load')"></script>
+
 <script>
-/* PWA: manifest + service worker inline */
+// PWA: manifest + service worker inline
 (function(){
   const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
   const isStandalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
   if(isIOS && !isStandalone){ document.getElementById('iosBanner').style.display='block'; }
-
-  function makeIcon(size){
-    const c=document.createElement('canvas'); c.width=c.height=size;
-    const g=c.getContext('2d'); g.fillStyle='#0f172a'; g.fillRect(0,0,size,size);
-    g.fillStyle='#3b82f6'; g.font=`${Math.round(size*0.5)}px 700 system-ui`;
-    g.textAlign='center'; g.textBaseline='middle'; g.fillText('BG', size/2, size/2+size*0.06);
-    return c.toDataURL('image/png');
-  }
-
-  const manifest = {
-    name:'Blur-Guard', short_name:'BlurGuard', start_url:'.', display:'standalone',
-    background_color:'#0b1020', theme_color:'#0b1020',
-    icons:[{src:makeIcon(192),sizes:'192x192',type:'image/png'},{src:makeIcon(512),sizes:'512x512',type:'image/png'}]
-  };
+  function makeIcon(size){ const c=document.createElement('canvas'); c.width=c.height=size; const g=c.getContext('2d'); g.fillStyle='#0f172a'; g.fillRect(0,0,size,size); g.fillStyle='#3b82f6'; g.font=`${Math.round(size*0.5)}px 700 system-ui`; g.textAlign='center'; g.textBaseline='middle'; g.fillText('DS', size/2, size/2+size*0.06); return c.toDataURL('image/png'); }
+  const manifest = { name:'Doc‑Scan', short_name:'DocScan', start_url:'.', display:'standalone', background_color:'#0b1020', theme_color:'#0b1020', icons:[{src:makeIcon(192),sizes:'192x192',type:'image/png'},{src:makeIcon(512),sizes:'512x512',type:'image/png'}] };
   const manUrl = URL.createObjectURL(new Blob([JSON.stringify(manifest)], {type:'application/json'}));
   const mlink = document.createElement('link'); mlink.rel='manifest'; mlink.href=manUrl; document.head.appendChild(mlink);
-
   if('serviceWorker' in navigator){
-    const swCode = `
-self.addEventListener('install',e=>{
-  e.waitUntil(caches.open('blur-guard-v4').then(c=>c.addAll(['./'])));
-  self.skipWaiting();
-});
-self.addEventListener('activate',e=>self.clients.claim());
-self.addEventListener('fetch',e=>{
-  e.respondWith(fetch(e.request).catch(()=>caches.match(e.request).then(r=>r||caches.match('./'))));
-});`;
+    const swCode = `self.addEventListener('install',e=>{e.waitUntil(caches.open('doc-scan-v1').then(c=>c.addAll(['./','https://docs.opencv.org/4.x/opencv.js'])));self.skipWaiting();});self.addEventListener('activate',e=>self.clients.claim());self.addEventListener('fetch',e=>{e.respondWith(fetch(e.request).catch(()=>caches.match(e.request).then(r=>r||caches.match('./'))))});`;
     const swUrl = URL.createObjectURL(new Blob([swCode], {type:'text/javascript'}));
     navigator.serviceWorker.register(swUrl).catch(()=>{});
   }
-
   let deferredPrompt=null; const installBtn=document.getElementById('installBtn');
   window.addEventListener('beforeinstallprompt', (e)=>{ e.preventDefault(); deferredPrompt=e; installBtn.style.display='inline-block'; });
   installBtn.onclick = async ()=>{ if(!deferredPrompt) return; deferredPrompt.prompt(); await deferredPrompt.userChoice; installBtn.style.display='none'; };
@@ -143,7 +121,12 @@ self.addEventListener('fetch',e=>{
 </script>
 
 <script>
-/* Main app logic with strict framing: requires 4 edges visible, 80–90% coverage, and margin from frame */
+// Utility: wait for OpenCV
+function waitForCV(){ return new Promise(res=>{ if(window.__cvReady) return res(); const iv=setInterval(()=>{ if(window.__cvReady){ clearInterval(iv); res(); } }, 50); }); }
+</script>
+
+<script>
+// Main app logic (OpenCV-based detection + quality checks)
 (function(){
   const video = document.getElementById('video');
   const overlay = document.getElementById('overlay');
@@ -157,8 +140,9 @@ self.addEventListener('fetch',e=>{
   const scoreTxt = document.getElementById('scoreTxt');
   const covTxt = document.getElementById('covTxt');
   const meterFill = document.getElementById('meterFill');
+  const modeTxt = document.getElementById('modeTxt');
+  const thumbs = document.getElementById('thumbs');
   const dsInput = document.getElementById('dsInput');
-  const stableMs = document.getElementById('stableMs');
   const tickMs = document.getElementById('tickMs');
   const volTh = document.getElementById('volTh');
   const tenTh = document.getElementById('tenTh');
@@ -167,377 +151,563 @@ self.addEventListener('fetch',e=>{
   const marginTh = document.getElementById('marginTh');
   const skewTh = document.getElementById('skewTh');
   const glareTh = document.getElementById('glareTh');
+  const arMin = document.getElementById('arMin');
+  const arMax = document.getElementById('arMax');
   const fileInput = document.getElementById('fileInput');
   const fallbackBtn = document.getElementById('fallbackBtn');
-  const thumbs = document.getElementById('thumbs');
 
-  // Rolling stats for sharpness → normalized score
-  const volStats = { n:0, mean:0, m2:0 };
-  const tenStats = { n:0, mean:0, m2:0 };
-  function zscore(stats, x){
-    stats.n++; const d = x - stats.mean; stats.mean += d / stats.n;
-    const d2 = x - stats.mean; stats.m2 += d * d2;
-    const v = (stats.n>1) ? (stats.m2 / (stats.n-1)) : 1e-6;
-    const sd = Math.sqrt(Math.max(v, 1e-6)); return (x - stats.mean) / sd;
-  }
-
-  let stream=null, timer=null;
+  let stream=null, timer=null; let lastAnalysisSize={w:0,h:0};
 
   startBtn.onclick = async () => {
     try {
+      await waitForCV();
+      status('OpenCV ready — start camera', '#10b981');
       startBtn.disabled = true;
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio:false
-      });
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio:false });
       video.srcObject = stream; await video.play();
       resizeOverlay(); window.addEventListener('resize', resizeOverlay);
-      snapBtn.disabled = false; status('analyzing…', '#f59e0b'); startLoop();
+      snapBtn.disabled = false; status('analyzing…', '#f59e0b');
+      startLoop();
     } catch (e) {
-      alert(`Camera error: ${e.message}
-Use HTTPS (or localhost). If in an in-app browser, open in Chrome/Safari and allow camera.`);
+      alert(`Camera/OpenCV error: ${e.message}
+Use HTTPS (or localhost). If in an in‑app browser, open in Chrome/Safari and allow camera.`);
       startBtn.disabled = false;
     }
   };
 
   snapBtn.onclick = () => captureAndValidate();
-  nextBtn.onclick = () => alert('Proceed to next step… (hook your flow)');
+  nextBtn.onclick = () => alert('Proceed to the next step… (hook your flow)');
   fallbackBtn.onclick = () => fileInput.click();
-  fileInput.onchange = async (e)=>{
-    const f=e.target.files && e.target.files[0]; if(!f) return;
-    const ok = await validateBlob(f, true);
-    if(!ok){
-      alert('Not acceptable — ensure all 4 edges visible, 80–90% coverage, sharp & well-lit.');
-      return;
-    }
-    addThumb(f); nextBtn.disabled=false;
-  };
+  fileInput.onchange = async (e)=>{ const f=e.target.files && e.target.files[0]; if(!f) return; const ok = await validateBlob(f); if(!ok){ alert('Not acceptable — show all 4 edges, 80–90% coverage, sharp, evenly lit, low glare.'); return; } addThumb(f); nextBtn.disabled=true; };
 
-  function startLoop(){ if(timer) clearInterval(timer); timer = setInterval(tick, +tickMs.value || 150); }
+  function startLoop(){ if(timer) clearInterval(timer); timer = setInterval(tick, +tickMs.value || 120); }
   function resizeOverlay(){ overlay.width = video.clientWidth; overlay.height = video.clientHeight; }
 
-  async function tick(){
-    if(!video.videoWidth) return;
-    const { gray, w, h } = grabAnalysisFrame(+dsInput.value || 256);
+  function getImageDataForAnalysis(maxSide){
+    const vw = video.videoWidth, vh = video.videoHeight; const scale = Math.max(vw,vh)/(+maxSide||320); const nw = Math.max(1, Math.round(vw/scale)); const nh = Math.max(1, Math.round(vh/scale));
+    work.width = nw; work.height = nh; const g = work.getContext('2d', {willReadFrequently:true}); g.drawImage(video, 0, 0, nw, nh); lastAnalysisSize={w:nw,h:nh}; return g.getImageData(0,0,nw,nh);
+  }
 
-    // Sharpness metrics
-    const vol = varianceOfLaplacian(gray, w, h);
-    const ten = tenengrad(gray, w, h);
-    const zVol = zscore(volStats, vol), zTen = zscore(tenStats, ten);
-    const score = 0.6 * zVol + 0.4 * zTen;
+  function imageDataToGrayMat(imgData){ const src = cv.matFromImageData(imgData); let gray = new cv.Mat(); cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY); src.delete(); return gray; }
 
-    // Exposure / glare / illumination
-    const {mean, pctLow, pctHigh} = luminanceStats(gray);
-    const under = mean<70 || pctLow>0.20;
-    const over = mean>180 || pctHigh>0.05;
-    const glareArea = saturatedArea(gray) / (w*h);
-    const illumRatio = illuminationRatio(gray, w, h, 31);
+  function blurMetrics(gray){ // VoL + Tenengrad
+    let lap = new cv.Mat(); cv.Laplacian(gray, lap, cv.CV_64F); const vol = varianceOfMat(lap);
+    let gx = new cv.Mat(), gy = new cv.Mat(); cv.Sobel(gray, gx, cv.CV_64F, 1, 0, 3); cv.Sobel(gray, gy, cv.CV_64F, 0, 1, 3); let ten = meanMatSquared(gx) + meanMatSquared(gy); lap.delete(); gx.delete(); gy.delete();
+    return {vol, ten};
+  }
+  function varianceOfMat(mat){ let m = new cv.Mat(); let s = new cv.Mat(); cv.meanStdDev(mat, m, s); const sd = s.doubleAt(0,0); m.delete(); s.delete(); return sd*sd; }
+  function meanMatSquared(mat){ let m=new cv.Mat(); let s=new cv.Mat(); cv.meanStdDev(mat,m,s); const mean = m.doubleAt(0,0); const sd = s.doubleAt(0,0); m.delete(); s.delete(); return mean*mean + sd*sd; }
 
-    // Document geometry
-    const doc = detectDocument(gray, w, h);
-    const coverage = doc ? (polygonArea(doc.corners) / (w*h)) : 0;
-    const anglesOK = doc ? anglesNearRight(doc.corners, (+skewTh.value)||12) : false;
-    const sidesOK  = doc ? oppositeSideRatioOK(doc.corners, 1.4) : false;
-    const marginsOK = doc ? edgeMarginsOK(doc.corners, w, h, (+marginTh.value)||0.02) : false;
+  function luminanceStats(gray){ // using histogram tails
+    let hist = new cv.Mat(); let mask = new cv.Mat(); const bins=256; const channels=[0]; const ranges=[0,256]; cv.calcHist([gray], channels, mask, hist, [bins], ranges); let total = gray.rows*gray.cols; let sum=0, lo=0, hi=0; for(let i=0;i<256;i++){ const c = hist.floatAt(i,0); sum += c*i; if(i<10) lo+=c; if(i>245) hi+=c; } hist.delete(); mask.delete(); const mean=sum/total; return {mean, pctLow:lo/total, pctHigh:hi/total}; }
 
-    drawOverlay(doc ? doc.corners : null, coverage, marginsOK, (+marginTh.value)||0.02, under, over, glareArea, illumRatio, score);
+  function glareArea(gray){ // simple saturation area proxy
+    let thr = new cv.Mat(); cv.threshold(gray, thr, 250, 255, cv.THRESH_BINARY); const frac = cv.countNonZero(thr)/(gray.rows*gray.cols); thr.delete(); return frac; }
 
-    // Decisions
-    const cold = volStats.n < 20 || tenStats.n < 20;
-    const blurPass = cold ? (vol > (+volTh.value||120) && ten > (+tenTh.value||8)) : (score > 0);
-    const covPass = coverage >= ((+covMinTh.value)||0.8) && coverage <= ((+covMaxTh.value)||0.9);
-    const expPass = !under && !over;
-    const glarePass = glareArea <= ((+glareTh.value)||0.03);
-    const skewPass = anglesOK && sidesOK;
-    const edgesPass = marginsOK;
+  function illuminationRatio(gray){ // 31x31 box blur → max/min
+    let k=31; let blur = new cv.Mat(); cv.blur(gray, blur, new cv.Size(k,k)); let min=new cv.Mat(), max=new cv.Mat(); cv.minMaxLoc(blur, {minVal:0,maxVal:0,minLoc:{},maxLoc:{}},); const mm=cv.minMaxLoc(blur); blur.delete(); return (mm.maxVal+1e-6)/(mm.minVal+1e-6); }
 
-    scoreTxt.textContent = score.toFixed(2);
-    covTxt.textContent = (coverage*100).toFixed(0) + '%';
-    meterFill.style.width = Math.max(0, Math.min(100, 50 + score*12)) + '%';
+  function detectDocument(gray){
+    // Edges
+    let blur = new cv.Mat(); cv.GaussianBlur(gray, blur, new cv.Size(5,5), 0);
+    let edges = new cv.Mat(); cv.Canny(blur, edges, 50, 150);
+    // Close gaps
+    let kernel = cv.Mat.ones(5,5, cv.CV_8U); cv.morphologyEx(edges, edges, cv.MORPH_CLOSE, kernel);
 
-    if(blurPass && covPass && expPass && glarePass && skewPass && edgesPass){
-      status('ready — good focus & full edges visible', '#16a34a');
-    } else {
-      let reason = !edgesPass ? 'edges cropped (show all 4)'
-                  : !covPass ? 'frame (keep 80–90%)'
-                  : !blurPass ? 'blur'
-                  : !expPass ? (under? 'too dark': 'too bright')
-                  : !glarePass ? 'glare'
-                  : !skewPass ? 'skew'
-                  : '';
-      status(`not ready — ${reason}`, '#ef4444');
+    // Contours
+    let contours = new cv.MatVector(); let hierarchy = new cv.Mat(); cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+    let quads=[]; let imgArea=gray.rows*gray.cols;
+    for(let i=0;i<contours.size();i++){
+      let cnt = contours.get(i);
+      const area = cv.contourArea(cnt);
+      if(area < imgArea*0.2) { cnt.delete(); continue; } // ignore tiny shapes
+      let peri = cv.arcLength(cnt, true);
+      let approx = new cv.Mat(); cv.approxPolyDP(cnt, approx, 0.02*peri, true);
+      if(approx.rows === 4 && cv.isContourConvex(approx)){
+        let corners=[]; for(let j=0;j<4;j++){ corners.push([approx.intAt(j,0), approx.intAt(j,1)]); }
+        quads.push({corners, area});
+      }
+      approx.delete(); cnt.delete();
     }
+    hierarchy.delete(); edges.delete(); kernel.delete(); blur.delete(); contours.delete();
+    if(quads.length===0) return {corners:null, coverage:0, count:0};
+    quads.sort((a,b)=>b.area-a.area);
+    const best=quads[0];
+    // Order TL,TR,BR,BL
+    const ordered = orderCorners(best.corners);
+    return {corners:ordered, coverage: best.area/imgArea, count: quads.length};
   }
 
-  async function captureAndValidate(){
-    const blob = await grabFrameBlob(); if(!blob) return;
-    const ok = await validateBlob(blob, false);
-    if(!ok){
-      alert('Retake: ensure all 4 edges visible, 80–90% coverage, sharp, evenly lit, low glare.');
-      return;
-    }
-    addThumb(blob); nextBtn.disabled=false;
+  function orderCorners(pts){ // TL,TR,BR,BL by sum/diff
+    pts = pts.slice();
+    pts.sort((a,b)=>a[1]-b[1]); // top two, bottom two
+    const top=pts.slice(0,2).sort((a,b)=>a[0]-b[0]);
+    const bottom=pts.slice(2,4).sort((a,b)=>a[0]-b[0]);
+    return [top[0], top[1], bottom[1], bottom[0]]; // TL,TR,BR,BL
   }
 
-  function grabAnalysisFrame(maxSide){
-    const vw = video.videoWidth, vh = video.videoHeight;
-    const scale = Math.max(vw,vh)/maxSide;
-    const nw = Math.max(1, Math.round(vw/scale));
-    const nh = Math.max(1, Math.round(vh/scale));
-    work.width = nw; work.height = nh;
-    const g = work.getContext('2d', {willReadFrequently:true});
-    g.drawImage(video, 0, 0, nw, nh);
-    const img = g.getImageData(0,0,nw,nh);
-    const gray = toGray(img.data);
-    return {gray, w:nw, h:nh};
-  }
+  function anglesNearRight(c, tolDeg){ function angle(a,b,c2){ const v1=[a[0]-b[0], a[1]-b[1]], v2=[c2[0]-b[0], c2[1]-b[1]]; const dot=v1[0]*v2[0]+v1[1]*v2[1]; const m1=Math.hypot(v1[0],v1[1]), m2=Math.hypot(v2[0],v2[1]); const cos=Math.max(-1, Math.min(1, dot/(m1*m2+1e-6))); return Math.acos(cos)*180/Math.PI; } for(let i=0;i<4;i++){ const a=c[(i+3)%4], b=c[i], d=c[(i+1)%4]; const ang=angle(a,b,d); if(Math.abs(90-ang)>tolDeg) return false; } return true; }
+  function oppositeSideRatioOK(c, maxRatio){ function len(p,q){ return Math.hypot(p[0]-q[0], p[1]-q[1]); } const ab=len(c[0],c[1]), bc=len(c[1],c[2]), cd=len(c[2],c[3]), da=len(c[3],c[0]); const r1=Math.max(ab,cd)/Math.max(1,Math.min(ab,cd)); const r2=Math.max(bc,da)/Math.max(1,Math.min(bc,da)); return r1<=maxRatio && r2<=maxRatio; }
+  function edgeMarginsOK(c,w,h,minFrac){ const minPix = minFrac * Math.min(w,h); for(const [x,y] of c){ const d = Math.min(x, y, w-1-x, h-1-y); if(d < minPix) return false; } return true; }
+  function aspectOK(c, lo, hi){ function len(p,q){ return Math.hypot(p[0]-q[0], p[1]-q[1]); } const w=(len(c[0],c[1])+len(c[2],c[3]))/2; const h=(len(c[1],c[2])+len(c[3],c[0]))/2; const r=Math.max(w,h)/Math.max(1,Math.min(w,h)); return r>=lo && r<=hi; }
 
-  async function grabFrameBlob(){
-    if(!stream) return null;
-    const track = stream.getVideoTracks()[0]; let blob=null;
-    if('ImageCapture' in window){
-      try {
-        const capture = new ImageCapture(track);
-        const bmp = await capture.grabFrame();
-        full.width = bmp.width; full.height = bmp.height;
-        full.getContext('2d').drawImage(bmp,0,0);
-        blob = await new Promise(res => full.toBlob(res, 'image/jpeg', 0.92));
-      } catch(e){ blob=null; }
-    }
-    if(!blob){
-      full.width = video.videoWidth; full.height = video.videoHeight;
-      full.getContext('2d').drawImage(video,0,0);
-      blob = await new Promise(res => full.toBlob(res, 'image/jpeg', 0.92));
-    }
-    return blob;
-  }
-
-  async function validateBlob(blob){
-    const bmp = await createImageBitmap(blob);
-    const shortSideOK = Math.min(bmp.width, bmp.height) >= 1000;
-
-    // Downscale for analysis
-    const maxSide = 512;
-    const scale = Math.max(bmp.width, bmp.height)/maxSide;
-    const nw = Math.max(1, Math.round(bmp.width/scale));
-    const nh = Math.max(1, Math.round(bmp.height/scale));
-
-    work.width = nw; work.height = nh;
-    const g = work.getContext('2d', { willReadFrequently:true });
-    g.drawImage(bmp, 0,0,nw,nh);
-    const img = g.getImageData(0,0,nw,nh);
-    const gray = toGray(img.data);
-
-    // Sharpness / exposure / glare
-    const vol = varianceOfLaplacian(gray, nw, nh);
-    const ten = tenengrad(gray, nw, nh);
-    const blurPass = (vol > (+volTh.value||120) && ten > (+tenTh.value||8));
-
-    const {mean, pctLow, pctHigh} = luminanceStats(gray);
-    const under = mean<70 || pctLow>0.20;
-    const over = mean>180 || pctHigh>0.05;
-    const expPass = !under && !over;
-
-    const glareArea = saturatedArea(gray)/(nw*nh);
-    const glarePass = glareArea <= ((+glareTh.value)||0.03);
-
-    const illumRatio = illuminationRatio(gray, nw, nh, 31);
-    const illumPass = illumRatio <= 2.5;
-
-    // Geometry
-    const doc = detectDocument(gray, nw, nh);
-    const coverage = doc ? polygonArea(doc.corners)/(nw*nh) : 0;
-    const covPass = coverage >= ((+covMinTh.value)||0.8) && coverage <= ((+covMaxTh.value)||0.9);
-    const skewPass = doc ? (anglesNearRight(doc.corners, (+skewTh.value)||12) && oppositeSideRatioOK(doc.corners, 1.4)) : false;
-    const edgesPass = doc ? edgeMarginsOK(doc.corners, nw, nh, (+marginTh.value)||0.02) : false;
-
-    return shortSideOK && blurPass && expPass && glarePass && illumPass && covPass && skewPass && edgesPass;
-  }
-
-  function addThumb(blob){
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href=url; a.download='capture.jpg'; a.title='Download';
-    const img=document.createElement('img');
-    img.src=url; img.style.width='100%'; img.style.borderRadius='10px'; img.loading='lazy';
-    a.appendChild(img); thumbs.prepend(a);
+  function drawOverlay(corners, coverage, marginsOK){
+    const g = overlay.getContext('2d'); const W=overlay.width, H=overlay.height; g.clearRect(0,0,W,H);
+    // Guide frame (~85%)
+    const target=0.85; const tw=W*target, th=H*target; const tx=(W-tw)/2, ty=(H-th)/2; g.strokeStyle='#ffffff66'; g.lineWidth=2; g.setLineDash([8,6]); g.strokeRect(tx,ty,tw,th); g.setLineDash([]);
+    if(!corners) return;
+    // Map analysis → overlay by last analysis size
+    const sx=W/lastAnalysisSize.w, sy=H/lastAnalysisSize.h; const cc=corners.map(([x,y])=>[x*sx,y*sy]);
+    const ok = marginsOK && coverage>=(+covMinTh.value) && coverage<=(+covMaxTh.value);
+    g.lineWidth=3; g.strokeStyle= ok? '#16a34a' : '#ef4444'; g.beginPath(); g.moveTo(cc[0][0],cc[0][1]); for(let i=1;i<cc.length;i++) g.lineTo(cc[i][0],cc[i][1]); g.closePath(); g.stroke();
+    g.fillStyle=g.strokeStyle; for(const [x,y] of cc){ g.beginPath(); g.arc(x,y,4,0,Math.PI*2); g.fill(); }
   }
 
   function status(text, color){ statusTxt.textContent = text; statusPill.style.background = color; }
 
-  // === Core metrics ===
-  function toGray(rgba){
-    const n=rgba.length/4; const out=new Uint8Array(n);
-    for(let i=0,j=0;i<n;i++,j+=4){
-      out[i]=(0.2126*rgba[j] + 0.7152*rgba[j+1] + 0.0722*rgba[j+2])|0;
+  function tick(){
+    if(!video.videoWidth || !window.__cvReady) return;
+    const imgData = getImageDataForAnalysis(+dsInput.value || 320);
+    const gray = imageDataToGrayMat(imgData);
+
+    // Blur
+    const {vol, ten} = blurMetrics(gray);
+
+    // Exposure / clipping
+    const L = luminanceStats(gray);
+    const under = L.mean<70 || L.pctLow>0.20; const over = L.mean>180 || L.pctHigh>0.05;
+
+    // Glare
+    const glareFrac = glareArea(gray);
+
+    // Document detection
+    const doc = detectDocument(gray);
+
+    // Pass/Fail logic
+    const blurPass = (vol > (+volTh.value||120) && ten > (+tenTh.value||8));
+    const covPass = doc.corners && doc.coverage >= (+covMinTh.value||0.8) && doc.coverage <= (+covMaxTh.value||0.9);
+    const expPass = !under && !over;
+    const glarePass = glareFrac <= (+glareTh.value||0.03);
+    const skewPass = doc.corners ? anglesNearRight(doc.corners, (+skewTh.value)||12) && oppositeSideRatioOK(doc.corners, 1.4) : false;
+    const edgesPass = doc.corners ? edgeMarginsOK(doc.corners, gray.cols, gray.rows, (+marginTh.value)||0.02) : false;
+    const aspectPass = doc.corners ? aspectOK(doc.corners, (+arMin.value)||1.3, (+arMax.value)||1.55) : false;
+    const singlePage = (doc.count<=1);
+
+    scoreTxt.textContent = (Math.log10(ten+1)+Math.log10(vol+1)).toFixed(2);
+    covTxt.textContent = ((doc.coverage||0)*100).toFixed(0) + '%';
+
+    drawOverlay(doc.corners, doc.coverage||0, edgesPass);
+    meterFill.style.width = Math.max(0, Math.min(100, 50 + (Math.log10(ten+1))*12)) + '%';
+
+    if(blurPass && covPass && expPass && glarePass && skewPass && edgesPass && aspectPass && singlePage){
+      status('ready — sharp, single page, well framed', '#16a34a');
+    } else {
+      let reason = !singlePage ? 'multiple pages' : !edgesPass ? 'edges cropped' : !covPass ? 'frame (keep 80–90%)' : !aspectPass ? 'aspect' : !skewPass ? 'skew' : !blurPass ? 'blur' : !expPass ? (under? 'too dark':'too bright') : !glarePass ? 'glare' : 'not ready';
+      status(`not ready — ${reason}`, '#ef4444');
     }
-    return out;
-  }
-  function varianceOfLaplacian(gray,w,h){
-    const k=[0,1,0,1,-4,1,0,1,0]; let sum=0,sum2=0,n=0;
-    for(let y=1;y<h-1;y++){
-      for(let x=1;x<w-1;x++){
-        let acc=0,ki=0;
-        for(let dy=-1;dy<=1;dy++){
-          const row=(y+dy)*w;
-          for(let dx=-1;dx<=1;dx++) acc += gray[row+(x+dx)]*k[ki++];
-        }
-        sum+=acc; sum2+=acc*acc; n++;
-      }
-    }
-    const m=sum/n; return (sum2/n)-m*m;
-  }
-  function tenengrad(gray,w,h){
-    const sx=[-1,0,1,-2,0,2,-1,0,1], sy=[-1,-2,-1,0,0,0,1,2,1];
-    let sum=0,n=0;
-    for(let y=1;y<h-1;y++){
-      for(let x=1;x<w-1;x++){
-        let gx=0,gy=0,ki=0;
-        for(let dy=-1;dy<=1;dy++){
-          const row=(y+dy)*w;
-          for(let dx=-1;dx<=1;dx++){
-            const p=gray[row+(x+dx)];
-            gx+=p*sx[ki]; gy+=p*sy[ki]; ki++;
-          }
-        }
-        const g2=gx*gx+gy*gy; sum+=g2; n++;
-      }
-    }
-    return sum/n;
-  }
-  function luminanceStats(gray){
-    let sum=0,n=gray.length,lo=0,hi=0;
-    for(let i=0;i<n;i++){ const v=gray[i]; sum+=v; if(v<10) lo++; if(v>245) hi++; }
-    return {mean:sum/n, pctLow:lo/n, pctHigh:hi/n};
-  }
-  function saturatedArea(gray){
-    let c=0; for(let i=0;i<gray.length;i++) if(gray[i]>250) c++; return c;
-  }
-  function illuminationRatio(gray,w,h,ksize){
-    const k=Math.max(3,ksize|0), r=(k-1)/2|0;
-    const out=new Float32Array(w*h);
-    for(let y=0;y<h;y++){
-      let acc=0;
-      for(let x=0;x<w;x++){
-        const add=gray[y*w+Math.min(w-1,x+r)], rem=gray[y*w+Math.max(0,x-r-1)];
-        acc+=add-rem; out[y*w+x]=acc;
-      }
-    }
-    let minv=1e9, maxv=-1e9;
-    const out2=new Float32Array(w*h);
-    for(let x=0;x<w;x++){
-      let acc=0;
-      for(let y=0;y<h;y++){
-        const add=out[Math.min(h-1,y+r)*w+x], rem=out[Math.max(0,y-r-1)*w+x];
-        acc+=add-rem; const v=acc/(k*k); out2[y*w+x]=v; if(v<minv) minv=v; if(v>maxv) maxv=v;
-      }
-    }
-    return (maxv+1e-6)/(minv+1e-6);
+
+    gray.delete();
   }
 
-  // === Document detection & geometry ===
-  function detectDocument(gray,w,h){
-    // Sobel magnitude
-    const sx=[-1,0,1,-2,0,2,-1,0,1], sy=[-1,-2,-1,0,0,0,1,2,1];
-    const mag=new Float32Array(w*h); let maxg=0;
-    for(let y=1;y<h-1;y++){
-      for(let x=1;x<w-1;x++){
-        let gx=0,gy=0,ki=0;
-        for(let dy=-1;dy<=1;dy++){
-          const row=(y+dy)*w;
-          for(let dx=-1;dx<=1;dx++){
-            const p=gray[row+(x+dx)];
-            gx+=p*sx[ki]; gy+=p*sy[ki]; ki++;
-          }
-        }
-        const g=Math.hypot(gx,gy); mag[y*w+x]=g; if(g>maxg) maxg=g;
-      }
-    }
-    // Threshold strongest edges
-    const th = maxg*0.25;
-    const pts=[];
-    for(let y=1;y<h-1;y++){
-      for(let x=1;x<w-1;x++){
-        if(mag[y*w+x]>=th) pts.push([x,y]);
-      }
-    }
-    if(pts.length<50) return null;
-
-    // Corners via extremes (fast heuristic that works well for documents)
-    let minSum=[0,0,1e9], maxSum=[0,0,-1e9], minDiff=[0,0,1e9], maxDiff=[0,0,-1e9];
-    for(const [x,y] of pts){
-      const s=x+y, d=x-y;
-      if(s<minSum[2]) minSum=[x,y,s];
-      if(s>maxSum[2]) maxSum=[x,y,s];
-      if(d<minDiff[2]) minDiff=[x,y,d];
-      if(d>maxDiff[2]) maxDiff=[x,y,d];
-    }
-    const corners=[ [minSum[0],minSum[1]], [maxDiff[0],maxDiff[1]], [maxSum[0],maxSum[1]], [minDiff[0],minDiff[1]] ];
-    if(!corners.every(([x,y])=>x>=0&&y>=0&&x<w&&y<h)) return null;
-    return { corners };
-  }
-  function polygonArea(c){
-    let a=0; for(let i=0;i<c.length;i++){
-      const [x1,y1]=c[i], [x2,y2]=c[(i+1)%c.length];
-      a += x1*y2 - x2*y1;
-    }
-    return Math.abs(a)/2;
-  }
-  function anglesNearRight(c, tolDeg){
-    function angle(a,b,c2){
-      const v1=[a[0]-b[0], a[1]-b[1]], v2=[c2[0]-b[0], c2[1]-b[1]];
-      const dot=v1[0]*v2[0]+v1[1]*v2[1];
-      const m1=Math.hypot(v1[0],v1[1]), m2=Math.hypot(v2[0],v2[1]);
-      const cos=Math.max(-1, Math.min(1, dot/(m1*m2+1e-6)));
-      return Math.acos(cos)*180/Math.PI;
-    }
-    for(let i=0;i<4;i++){
-      const a=c[(i+3)%4], b=c[i], d=c[(i+1)%4];
-      const ang=angle(a,b,d); if(Math.abs(90-ang)>tolDeg) return false;
-    }
-    return true;
-  }
-  function oppositeSideRatioOK(c, maxRatio){
-    function len(p,q){ return Math.hypot(p[0]-q[0], p[1]-q[1]); }
-    const ab=len(c[0],c[1]), bc=len(c[1],c[2]), cd=len(c[2],c[3]), da=len(c[3],c[0]);
-    const r1=Math.max(ab,cd)/Math.max(1,Math.min(ab,cd));
-    const r2=Math.max(bc,da)/Math.max(1,Math.min(bc,da));
-    return r1<=maxRatio && r2<=maxRatio;
-  }
-  function edgeMarginsOK(c,w,h,minFrac){
-    // Every corner must sit at least minFrac * min(w,h) pixels from the frame
-    const minPix = minFrac * Math.min(w,h);
-    for(const [x,y] of c){
-      const d = Math.min(x, y, w-1-x, h-1-y);
-      if(d < minPix) return false;
-    }
-    return true;
+  async function captureAndValidate(){
+    const blob = await grabFrameBlob(); if(!blob) return;
+    const ok = await validateBlob(blob);
+    if(!ok){ alert('Retake: show all 4 edges, 80–90% coverage, sharp focus, even lighting, low glare.'); return; }
+    addThumb(blob); nextBtn.disabled=false;
   }
 
-  // Overlay drawing
-  function drawOverlay(corners, coverage, marginsOK, marginFrac, under, over, glareArea, illumRatio, score){
+  async function validateBlob(blob){
+    const bmp = await createImageBitmap(blob);
+    const shortSideOK = Math.min(bmp.width, bmp.height) >= 1000; if(!shortSideOK) return false;
+    // Run the same analysis on a resized Bitmap via canvas → ImageData → cv.Mat
+    const maxSide = 640; const scale = Math.max(bmp.width, bmp.height)/maxSide; const nw=Math.max(1,Math.round(bmp.width/scale)), nh=Math.max(1,Math.round(bmp.height/scale));
+    work.width=nw; work.height=nh; const g=work.getContext('2d',{willReadFrequently:true}); g.drawImage(bmp,0,0,nw,nh); const imgData=g.getImageData(0,0,nw,nh);
+    const gray=imageDataToGrayMat(imgData);
+
+    const {vol,ten}=blurMetrics(gray);
+    const L=luminanceStats(gray); const under=L.mean<70||L.pctLow>0.20; const over=L.mean>180||L.pctHigh>0.05; const expPass=!under&&!over;
+    const glareFrac=glareArea(gray); const glarePass = glareFrac <= (+glareTh.value||0.03);
+    const doc=detectDocument(gray);
+    const covPass=doc.corners && doc.coverage>=(+covMinTh.value||0.8) && doc.coverage<= (+covMaxTh.value||0.9);
+    const skewPass=doc.corners && anglesNearRight(doc.corners,(+skewTh.value)||12) && oppositeSideRatioOK(doc.corners,1.4);
+    const edgesPass=doc.corners && edgeMarginsOK(doc.corners, gray.cols, gray.rows, (+marginTh.value)||0.02);
+    const aspectPass=doc.corners && aspectOK(doc.corners, (+arMin.value)||1.3, (+arMax.value)||1.55);
+    const blurPass=(vol>(+volTh.value||120) && ten>(+tenTh.value||8));
+
+    gray.delete();
+    return shortSideOK && blurPass && expPass && glarePass && covPass && skewPass && edgesPass && aspectPass && (doc.count<=1);
+  }
+
+  async function grabFrameBlob(){
+    if(!stream) return null; const track = stream.getVideoTracks()[0]; let blob=null;
+    if('ImageCapture' in window){ try { const capture = new ImageCapture(track); const bmp = await capture.grabFrame(); full.width = bmp.width; full.height = bmp.height; full.getContext('2d').drawImage(bmp,0,0); blob = await new Promise(res => full.toBlob(res, 'image/jpeg', 0.95)); } catch(e){ blob=null; } }
+    if(!blob){ full.width = video.videoWidth; full.height = video.videoHeight; full.getContext('2d').drawImage(video,0,0); blob = await new Promise(res => full.toBlob(res, 'image/jpeg', 0.95)); }
+    return blob;
+  }
+
+  function addThumb(blob){ const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=url; a.download='capture.jpg'; a.title='Download'; const img=document.createElement('img'); img.src=url; img.style.width='100%'; img.style.borderRadius='10px'; img.loading='lazy'; a.appendChild(img); thumbs.prepend(a); }
+
+  // Kick off analysis loop after cv is ready
+  waitForCV().then(()=>{ status('OpenCV ready — start camera', '#10b981'); });
+  setInterval(()=>{ if(stream) tick(); }, +tickMs.value || 120);
+})();
+</script>
+</body>
+</html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Doc‑Scan MVP (PWA, OpenCV.js)</title>
+  <meta name="theme-color" content="#0b1020" />
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <style>
+    :root { --ok:#16a34a; --warn:#f59e0b; --bad:#ef4444; --bg:#0b1020; --card:#0f172a; --fg:#e5e7eb; }
+    html,body { height:100%; margin:0; background:var(--bg); color:var(--fg); font:16px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    .wrap { max-width:980px; margin:0 auto; padding:16px; }
+    .grid { display:grid; gap:16px; grid-template-columns: 1fr; }
+    @media(min-width:900px){ .grid{ grid-template-columns: 2fr 1fr; } }
+    .card { background:var(--card); border-radius:16px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,.3); }
+    .btn { cursor:pointer; border:0; border-radius:12px; padding:12px 16px; font-weight:600; color:white; background:#3b82f6; }
+    .btn:disabled{ opacity:.5; cursor:not-allowed; }
+    .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+    .pill { border-radius:999px; padding:6px 12px; font-weight:700; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .meter { height:12px; background:#1f2937; border-radius:999px; overflow:hidden; }
+    .meter > div { height:100%; background:linear-gradient(90deg, var(--bad), var(--warn), var(--ok)); width:0%; transition:width .15s linear; }
+    .thumbs { display:grid; grid-template-columns: repeat(auto-fill, minmax(140px,1fr)); gap:10px; }
+    .hint { opacity:.8; font-size:.9rem }
+    .footer { opacity:.6; font-size:.85rem; margin-top:8px }
+    .next { background:#10b981 }
+    .banner { background:#111827; border:1px solid #1f2937; padding:10px 12px; border-radius:10px; margin:10px 0; }
+    .install { background:#0ea5e9 }
+    .overlayWrap { position:relative; margin-top:12px }
+    #overlay { position:absolute; inset:0; pointer-events:none; border-radius:12px }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Doc‑Scan MVP</h1>
+    <p class="hint">On‑device checks with OpenCV.js: <b>blur</b>, <b>exposure</b>, <b>glare</b>, <b>single‑page detection</b>, <b>coverage 80–90%</b>, <b>all 4 edges visible</b>, <b>skew</b>, <b>aspect ratio</b>. Installable PWA; offline after first load.</p>
+
+    <div id="iosBanner" class="banner" style="display:none">
+      <b>Tip (iPhone):</b> Share → <b>Add to Home Screen</b> for best camera behavior.
+    </div>
+
+    <div class="grid">
+      <section class="card">
+        <div class="row">
+          <button id="startBtn" class="btn">Start camera</button>
+          <button id="snapBtn" class="btn" disabled>Capture</button>
+          <button id="nextBtn" class="btn next" disabled>Next step →</button>
+          <button id="installBtn" class="btn install" style="display:none">Install app</button>
+          <input id="fileInput" type="file" accept="image/*;capture=camera" style="display:none" />
+          <button id="fallbackBtn" class="btn" style="background:#6b7280">Upload (fallback)</button>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <span id="statusPill" class="pill" style="background:#1f2937">status: <span id="statusTxt">loading OpenCV…</span></span>
+          <span class="pill" style="background:#111827">sharp: <span id="scoreTxt" class="mono">—</span></span>
+          <span class="pill" style="background:#111827">coverage: <span id="covTxt" class="mono">—</span></span>
+          <span class="pill" style="background:#111827">mode: <span id="modeTxt" class="mono">manual</span></span>
+        </div>
+
+        <div style="margin-top:12px" class="meter"><div id="meterFill"></div></div>
+        <div class="footer">Dashed frame ≈ target size (~85%). Green outline tracks the detected page.</div>
+
+        <div class="overlayWrap">
+          <video id="video" autoplay playsinline muted style="width:100%; border-radius:12px; background:black"></video>
+          <canvas id="overlay"></canvas>
+          <canvas id="work" width="0" height="0" style="display:none"></canvas>
+          <canvas id="full" width="0" height="0" style="display:none"></canvas>
+        </div>
+      </section>
+
+      <aside class="card">
+        <h3>Accepted photos</h3>
+        <div id="thumbs" class="thumbs"></div>
+        <div class="hint">Tap a thumbnail to download.</div>
+      </aside>
+    </div>
+
+    <details class="card" style="margin-top:16px">
+      <summary><b>Settings</b></summary>
+      <div class="row" style="margin-top:10px">
+        <label>Analysis max side: <input id="dsInput" type="number" value="320" class="mono" style="width:90px"></label>
+        <label>Frame interval ms: <input id="tickMs" type="number" value="120" class="mono" style="width:110px"></label>
+        <label>Blur (VoL &gt;): <input id="volTh" type="number" value="120" class="mono" style="width:70px"></label>
+        <label>Tenengrad &gt; <input id="tenTh" type="number" value="8" class="mono" style="width:70px"></label>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <span class="pill" style="background:#111827">Coverage min: <input id="covMinTh" type="number" value="0.80" step="0.05" class="mono" style="width:80px"></span>
+        <span class="pill" style="background:#111827">Coverage max: <input id="covMaxTh" type="number" value="0.90" step="0.05" class="mono" style="width:80px"></span>
+        <span class="pill" style="background:#111827">Min edge margin %: <input id="marginTh" type="number" value="0.02" step="0.01" class="mono" style="width:90px"></span>
+        <span class="pill" style="background:#111827">Max skew (°): <input id="skewTh" type="number" value="12" class="mono" style="width:80px"></span>
+        <span class="pill" style="background:#111827">Glare max area: <input id="glareTh" type="number" value="0.03" step="0.01" class="mono" style="width:80px"></span>
+        <span class="pill" style="background:#111827">Aspect (long/short): <input id="arMin" type="number" value="1.30" step="0.05" class="mono" style="width:80px">–<input id="arMax" type="number" value="1.55" step="0.05" class="mono" style="width:80px"></span>
+      </div>
+    </details>
+
+    <p class="footer">Use <b>HTTPS</b> (or <code>http://localhost</code>) for camera access.</p>
+  </div>
+
+<!-- OpenCV.js from official CDN (cached by PWA after first visit) -->
+<script async src="https://docs.opencv.org/4.x/opencv.js" onload="cv && (cv['onRuntimeInitialized']=()=>window.__cvReady=1)" onerror="console.error('OpenCV failed to load')"></script>
+
+<script>
+// PWA: manifest + service worker inline
+(function(){
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isStandalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  if(isIOS && !isStandalone){ document.getElementById('iosBanner').style.display='block'; }
+  function makeIcon(size){ const c=document.createElement('canvas'); c.width=c.height=size; const g=c.getContext('2d'); g.fillStyle='#0f172a'; g.fillRect(0,0,size,size); g.fillStyle='#3b82f6'; g.font=`${Math.round(size*0.5)}px 700 system-ui`; g.textAlign='center'; g.textBaseline='middle'; g.fillText('DS', size/2, size/2+size*0.06); return c.toDataURL('image/png'); }
+  const manifest = { name:'Doc‑Scan', short_name:'DocScan', start_url:'.', display:'standalone', background_color:'#0b1020', theme_color:'#0b1020', icons:[{src:makeIcon(192),sizes:'192x192',type:'image/png'},{src:makeIcon(512),sizes:'512x512',type:'image/png'}] };
+  const manUrl = URL.createObjectURL(new Blob([JSON.stringify(manifest)], {type:'application/json'}));
+  const mlink = document.createElement('link'); mlink.rel='manifest'; mlink.href=manUrl; document.head.appendChild(mlink);
+  if('serviceWorker' in navigator){
+    const swCode = `self.addEventListener('install',e=>{e.waitUntil(caches.open('doc-scan-v1').then(c=>c.addAll(['./','https://docs.opencv.org/4.x/opencv.js'])));self.skipWaiting();});self.addEventListener('activate',e=>self.clients.claim());self.addEventListener('fetch',e=>{e.respondWith(fetch(e.request).catch(()=>caches.match(e.request).then(r=>r||caches.match('./'))))});`;
+    const swUrl = URL.createObjectURL(new Blob([swCode], {type:'text/javascript'}));
+    navigator.serviceWorker.register(swUrl).catch(()=>{});
+  }
+  let deferredPrompt=null; const installBtn=document.getElementById('installBtn');
+  window.addEventListener('beforeinstallprompt', (e)=>{ e.preventDefault(); deferredPrompt=e; installBtn.style.display='inline-block'; });
+  installBtn.onclick = async ()=>{ if(!deferredPrompt) return; deferredPrompt.prompt(); await deferredPrompt.userChoice; installBtn.style.display='none'; };
+})();
+</script>
+
+<script>
+// Utility: wait for OpenCV
+function waitForCV(){ return new Promise(res=>{ if(window.__cvReady) return res(); const iv=setInterval(()=>{ if(window.__cvReady){ clearInterval(iv); res(); } }, 50); }); }
+</script>
+
+<script>
+// Main app logic (OpenCV-based detection + quality checks)
+(function(){
+  const video = document.getElementById('video');
+  const overlay = document.getElementById('overlay');
+  const work = document.getElementById('work');
+  const full = document.getElementById('full');
+  const startBtn = document.getElementById('startBtn');
+  const snapBtn = document.getElementById('snapBtn');
+  const nextBtn = document.getElementById('nextBtn');
+  const statusTxt = document.getElementById('statusTxt');
+  const statusPill = document.getElementById('statusPill');
+  const scoreTxt = document.getElementById('scoreTxt');
+  const covTxt = document.getElementById('covTxt');
+  const meterFill = document.getElementById('meterFill');
+  const modeTxt = document.getElementById('modeTxt');
+  const thumbs = document.getElementById('thumbs');
+  const dsInput = document.getElementById('dsInput');
+  const tickMs = document.getElementById('tickMs');
+  const volTh = document.getElementById('volTh');
+  const tenTh = document.getElementById('tenTh');
+  const covMinTh = document.getElementById('covMinTh');
+  const covMaxTh = document.getElementById('covMaxTh');
+  const marginTh = document.getElementById('marginTh');
+  const skewTh = document.getElementById('skewTh');
+  const glareTh = document.getElementById('glareTh');
+  const arMin = document.getElementById('arMin');
+  const arMax = document.getElementById('arMax');
+  const fileInput = document.getElementById('fileInput');
+  const fallbackBtn = document.getElementById('fallbackBtn');
+
+  let stream=null, timer=null; let lastAnalysisSize={w:0,h:0};
+
+  startBtn.onclick = async () => {
+    try {
+      await waitForCV();
+      status('OpenCV ready — start camera', '#10b981');
+      startBtn.disabled = true;
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio:false });
+      video.srcObject = stream; await video.play();
+      resizeOverlay(); window.addEventListener('resize', resizeOverlay);
+      snapBtn.disabled = false; status('analyzing…', '#f59e0b');
+      startLoop();
+    } catch (e) {
+      alert(`Camera/OpenCV error: ${e.message}
+Use HTTPS (or localhost). If in an in‑app browser, open in Chrome/Safari and allow camera.`);
+      startBtn.disabled = false;
+    }
+  };
+
+  snapBtn.onclick = () => captureAndValidate();
+  nextBtn.onclick = () => alert('Proceed to the next step… (hook your flow)');
+  fallbackBtn.onclick = () => fileInput.click();
+  fileInput.onchange = async (e)=>{ const f=e.target.files && e.target.files[0]; if(!f) return; const ok = await validateBlob(f); if(!ok){ alert('Not acceptable — show all 4 edges, 80–90% coverage, sharp, evenly lit, low glare.'); return; } addThumb(f); nextBtn.disabled=true; };
+
+  function startLoop(){ if(timer) clearInterval(timer); timer = setInterval(tick, +tickMs.value || 120); }
+  function resizeOverlay(){ overlay.width = video.clientWidth; overlay.height = video.clientHeight; }
+
+  function getImageDataForAnalysis(maxSide){
+    const vw = video.videoWidth, vh = video.videoHeight; const scale = Math.max(vw,vh)/(+maxSide||320); const nw = Math.max(1, Math.round(vw/scale)); const nh = Math.max(1, Math.round(vh/scale));
+    work.width = nw; work.height = nh; const g = work.getContext('2d', {willReadFrequently:true}); g.drawImage(video, 0, 0, nw, nh); lastAnalysisSize={w:nw,h:nh}; return g.getImageData(0,0,nw,nh);
+  }
+
+  function imageDataToGrayMat(imgData){ const src = cv.matFromImageData(imgData); let gray = new cv.Mat(); cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY); src.delete(); return gray; }
+
+  function blurMetrics(gray){ // VoL + Tenengrad
+    let lap = new cv.Mat(); cv.Laplacian(gray, lap, cv.CV_64F); const vol = varianceOfMat(lap);
+    let gx = new cv.Mat(), gy = new cv.Mat(); cv.Sobel(gray, gx, cv.CV_64F, 1, 0, 3); cv.Sobel(gray, gy, cv.CV_64F, 0, 1, 3); let ten = meanMatSquared(gx) + meanMatSquared(gy); lap.delete(); gx.delete(); gy.delete();
+    return {vol, ten};
+  }
+  function varianceOfMat(mat){ let m = new cv.Mat(); let s = new cv.Mat(); cv.meanStdDev(mat, m, s); const sd = s.doubleAt(0,0); m.delete(); s.delete(); return sd*sd; }
+  function meanMatSquared(mat){ let m=new cv.Mat(); let s=new cv.Mat(); cv.meanStdDev(mat,m,s); const mean = m.doubleAt(0,0); const sd = s.doubleAt(0,0); m.delete(); s.delete(); return mean*mean + sd*sd; }
+
+  function luminanceStats(gray){ // using histogram tails
+    let hist = new cv.Mat(); let mask = new cv.Mat(); const bins=256; const channels=[0]; const ranges=[0,256]; cv.calcHist([gray], channels, mask, hist, [bins], ranges); let total = gray.rows*gray.cols; let sum=0, lo=0, hi=0; for(let i=0;i<256;i++){ const c = hist.floatAt(i,0); sum += c*i; if(i<10) lo+=c; if(i>245) hi+=c; } hist.delete(); mask.delete(); const mean=sum/total; return {mean, pctLow:lo/total, pctHigh:hi/total}; }
+
+  function glareArea(gray){ // simple saturation area proxy
+    let thr = new cv.Mat(); cv.threshold(gray, thr, 250, 255, cv.THRESH_BINARY); const frac = cv.countNonZero(thr)/(gray.rows*gray.cols); thr.delete(); return frac; }
+
+  function illuminationRatio(gray){ // 31x31 box blur → max/min
+    let k=31; let blur = new cv.Mat(); cv.blur(gray, blur, new cv.Size(k,k)); let min=new cv.Mat(), max=new cv.Mat(); cv.minMaxLoc(blur, {minVal:0,maxVal:0,minLoc:{},maxLoc:{}},); const mm=cv.minMaxLoc(blur); blur.delete(); return (mm.maxVal+1e-6)/(mm.minVal+1e-6); }
+
+  function detectDocument(gray){
+    // Edges
+    let blur = new cv.Mat(); cv.GaussianBlur(gray, blur, new cv.Size(5,5), 0);
+    let edges = new cv.Mat(); cv.Canny(blur, edges, 50, 150);
+    // Close gaps
+    let kernel = cv.Mat.ones(5,5, cv.CV_8U); cv.morphologyEx(edges, edges, cv.MORPH_CLOSE, kernel);
+
+    // Contours
+    let contours = new cv.MatVector(); let hierarchy = new cv.Mat(); cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+    let quads=[]; let imgArea=gray.rows*gray.cols;
+    for(let i=0;i<contours.size();i++){
+      let cnt = contours.get(i);
+      const area = cv.contourArea(cnt);
+      if(area < imgArea*0.2) { cnt.delete(); continue; } // ignore tiny shapes
+      let peri = cv.arcLength(cnt, true);
+      let approx = new cv.Mat(); cv.approxPolyDP(cnt, approx, 0.02*peri, true);
+      if(approx.rows === 4 && cv.isContourConvex(approx)){
+        let corners=[]; for(let j=0;j<4;j++){ corners.push([approx.intAt(j,0), approx.intAt(j,1)]); }
+        quads.push({corners, area});
+      }
+      approx.delete(); cnt.delete();
+    }
+    hierarchy.delete(); edges.delete(); kernel.delete(); blur.delete(); contours.delete();
+    if(quads.length===0) return {corners:null, coverage:0, count:0};
+    quads.sort((a,b)=>b.area-a.area);
+    const best=quads[0];
+    // Order TL,TR,BR,BL
+    const ordered = orderCorners(best.corners);
+    return {corners:ordered, coverage: best.area/imgArea, count: quads.length};
+  }
+
+  function orderCorners(pts){ // TL,TR,BR,BL by sum/diff
+    pts = pts.slice();
+    pts.sort((a,b)=>a[1]-b[1]); // top two, bottom two
+    const top=pts.slice(0,2).sort((a,b)=>a[0]-b[0]);
+    const bottom=pts.slice(2,4).sort((a,b)=>a[0]-b[0]);
+    return [top[0], top[1], bottom[1], bottom[0]]; // TL,TR,BR,BL
+  }
+
+  function anglesNearRight(c, tolDeg){ function angle(a,b,c2){ const v1=[a[0]-b[0], a[1]-b[1]], v2=[c2[0]-b[0], c2[1]-b[1]]; const dot=v1[0]*v2[0]+v1[1]*v2[1]; const m1=Math.hypot(v1[0],v1[1]), m2=Math.hypot(v2[0],v2[1]); const cos=Math.max(-1, Math.min(1, dot/(m1*m2+1e-6))); return Math.acos(cos)*180/Math.PI; } for(let i=0;i<4;i++){ const a=c[(i+3)%4], b=c[i], d=c[(i+1)%4]; const ang=angle(a,b,d); if(Math.abs(90-ang)>tolDeg) return false; } return true; }
+  function oppositeSideRatioOK(c, maxRatio){ function len(p,q){ return Math.hypot(p[0]-q[0], p[1]-q[1]); } const ab=len(c[0],c[1]), bc=len(c[1],c[2]), cd=len(c[2],c[3]), da=len(c[3],c[0]); const r1=Math.max(ab,cd)/Math.max(1,Math.min(ab,cd)); const r2=Math.max(bc,da)/Math.max(1,Math.min(bc,da)); return r1<=maxRatio && r2<=maxRatio; }
+  function edgeMarginsOK(c,w,h,minFrac){ const minPix = minFrac * Math.min(w,h); for(const [x,y] of c){ const d = Math.min(x, y, w-1-x, h-1-y); if(d < minPix) return false; } return true; }
+  function aspectOK(c, lo, hi){ function len(p,q){ return Math.hypot(p[0]-q[0], p[1]-q[1]); } const w=(len(c[0],c[1])+len(c[2],c[3]))/2; const h=(len(c[1],c[2])+len(c[3],c[0]))/2; const r=Math.max(w,h)/Math.max(1,Math.min(w,h)); return r>=lo && r<=hi; }
+
+  function drawOverlay(corners, coverage, marginsOK){
     const g = overlay.getContext('2d'); const W=overlay.width, H=overlay.height; g.clearRect(0,0,W,H);
+    // Guide frame (~85%)
+    const target=0.85; const tw=W*target, th=H*target; const tx=(W-tw)/2, ty=(H-th)/2; g.strokeStyle='#ffffff66'; g.lineWidth=2; g.setLineDash([8,6]); g.strokeRect(tx,ty,tw,th); g.setLineDash([]);
+    if(!corners) return;
+    // Map analysis → overlay by last analysis size
+    const sx=W/lastAnalysisSize.w, sy=H/lastAnalysisSize.h; const cc=corners.map(([x,y])=>[x*sx,y*sy]);
+    const ok = marginsOK && coverage>=(+covMinTh.value) && coverage<=(+covMaxTh.value);
+    g.lineWidth=3; g.strokeStyle= ok? '#16a34a' : '#ef4444'; g.beginPath(); g.moveTo(cc[0][0],cc[0][1]); for(let i=1;i<cc.length;i++) g.lineTo(cc[i][0],cc[i][1]); g.closePath(); g.stroke();
+    g.fillStyle=g.strokeStyle; for(const [x,y] of cc){ g.beginPath(); g.arc(x,y,4,0,Math.PI*2); g.fill(); }
+  }
 
-    // Outer target ~85% of view
-    const target=0.85; const tw=W*target, th=H*target; const tx=(W-tw)/2, ty=(H-th)/2;
-    g.strokeStyle='#ffffff66'; g.lineWidth=2; g.setLineDash([8,6]); g.strokeRect(tx,ty,tw,th); g.setLineDash([]);
+  function status(text, color){ statusTxt.textContent = text; statusPill.style.background = color; }
 
-    // Inner required margin from edges
-    const m = marginFrac * Math.min(W,H);
-    g.setLineDash([4,4]); g.strokeStyle='#ffffff44'; g.strokeRect(m,m, W-2*m, H-2*m); g.setLineDash([]);
+  function tick(){
+    if(!video.videoWidth || !window.__cvReady) return;
+    const imgData = getImageDataForAnalysis(+dsInput.value || 320);
+    const gray = imageDataToGrayMat(imgData);
 
-    if(corners){
-      // map analysis coords → overlay coords by ratio to work canvas
-      const { w, h } = work; const sx=W/w, sy=H/h; const cc=corners.map(([x,y])=>[x*sx,y*sy]);
-      const ok = marginsOK && coverage>=((+covMinTh.value)||0.8) && coverage<=((+covMaxTh.value)||0.9);
-      g.lineWidth=3; g.strokeStyle= ok ? '#16a34a' : '#ef4444';
-      g.beginPath(); g.moveTo(cc[0][0],cc[0][1]); for(let i=1;i<cc.length;i++) g.lineTo(cc[i][0],cc[i][1]); g.closePath(); g.stroke();
-      g.fillStyle=g.strokeStyle; for(const [x,y] of cc){ g.beginPath(); g.arc(x,y,4,0,Math.PI*2); g.fill(); }
+    // Blur
+    const {vol, ten} = blurMetrics(gray);
+
+    // Exposure / clipping
+    const L = luminanceStats(gray);
+    const under = L.mean<70 || L.pctLow>0.20; const over = L.mean>180 || L.pctHigh>0.05;
+
+    // Glare
+    const glareFrac = glareArea(gray);
+
+    // Document detection
+    const doc = detectDocument(gray);
+
+    // Pass/Fail logic
+    const blurPass = (vol > (+volTh.value||120) && ten > (+tenTh.value||8));
+    const covPass = doc.corners && doc.coverage >= (+covMinTh.value||0.8) && doc.coverage <= (+covMaxTh.value||0.9);
+    const expPass = !under && !over;
+    const glarePass = glareFrac <= (+glareTh.value||0.03);
+    const skewPass = doc.corners ? anglesNearRight(doc.corners, (+skewTh.value)||12) && oppositeSideRatioOK(doc.corners, 1.4) : false;
+    const edgesPass = doc.corners ? edgeMarginsOK(doc.corners, gray.cols, gray.rows, (+marginTh.value)||0.02) : false;
+    const aspectPass = doc.corners ? aspectOK(doc.corners, (+arMin.value)||1.3, (+arMax.value)||1.55) : false;
+    const singlePage = (doc.count<=1);
+
+    scoreTxt.textContent = (Math.log10(ten+1)+Math.log10(vol+1)).toFixed(2);
+    covTxt.textContent = ((doc.coverage||0)*100).toFixed(0) + '%';
+
+    drawOverlay(doc.corners, doc.coverage||0, edgesPass);
+    meterFill.style.width = Math.max(0, Math.min(100, 50 + (Math.log10(ten+1))*12)) + '%';
+
+    if(blurPass && covPass && expPass && glarePass && skewPass && edgesPass && aspectPass && singlePage){
+      status('ready — sharp, single page, well framed', '#16a34a');
+    } else {
+      let reason = !singlePage ? 'multiple pages' : !edgesPass ? 'edges cropped' : !covPass ? 'frame (keep 80–90%)' : !aspectPass ? 'aspect' : !skewPass ? 'skew' : !blurPass ? 'blur' : !expPass ? (under? 'too dark':'too bright') : !glarePass ? 'glare' : 'not ready';
+      status(`not ready — ${reason}`, '#ef4444');
     }
 
-    const hud=`exp:${under?'low':over?'high':'ok'} glare:${(glareArea*100).toFixed(0)}% illum:${illumRatio.toFixed(2)} sharp:${score.toFixed(2)}`;
-    g.fillStyle='#00000080'; g.fillRect(8,H-28, 260, 22);
-    g.fillStyle='#fff'; g.font='12px ui-monospace,monospace'; g.fillText(hud, 16, H-12);
+    gray.delete();
   }
+
+  async function captureAndValidate(){
+    const blob = await grabFrameBlob(); if(!blob) return;
+    const ok = await validateBlob(blob);
+    if(!ok){ alert('Retake: show all 4 edges, 80–90% coverage, sharp focus, even lighting, low glare.'); return; }
+    addThumb(blob); nextBtn.disabled=false;
+  }
+
+  async function validateBlob(blob){
+    const bmp = await createImageBitmap(blob);
+    const shortSideOK = Math.min(bmp.width, bmp.height) >= 1000; if(!shortSideOK) return false;
+    // Run the same analysis on a resized Bitmap via canvas → ImageData → cv.Mat
+    const maxSide = 640; const scale = Math.max(bmp.width, bmp.height)/maxSide; const nw=Math.max(1,Math.round(bmp.width/scale)), nh=Math.max(1,Math.round(bmp.height/scale));
+    work.width=nw; work.height=nh; const g=work.getContext('2d',{willReadFrequently:true}); g.drawImage(bmp,0,0,nw,nh); const imgData=g.getImageData(0,0,nw,nh);
+    const gray=imageDataToGrayMat(imgData);
+
+    const {vol,ten}=blurMetrics(gray);
+    const L=luminanceStats(gray); const under=L.mean<70||L.pctLow>0.20; const over=L.mean>180||L.pctHigh>0.05; const expPass=!under&&!over;
+    const glareFrac=glareArea(gray); const glarePass = glareFrac <= (+glareTh.value||0.03);
+    const doc=detectDocument(gray);
+    const covPass=doc.corners && doc.coverage>=(+covMinTh.value||0.8) && doc.coverage<= (+covMaxTh.value||0.9);
+    const skewPass=doc.corners && anglesNearRight(doc.corners,(+skewTh.value)||12) && oppositeSideRatioOK(doc.corners,1.4);
+    const edgesPass=doc.corners && edgeMarginsOK(doc.corners, gray.cols, gray.rows, (+marginTh.value)||0.02);
+    const aspectPass=doc.corners && aspectOK(doc.corners, (+arMin.value)||1.3, (+arMax.value)||1.55);
+    const blurPass=(vol>(+volTh.value||120) && ten>(+tenTh.value||8));
+
+    gray.delete();
+    return shortSideOK && blurPass && expPass && glarePass && covPass && skewPass && edgesPass && aspectPass && (doc.count<=1);
+  }
+
+  async function grabFrameBlob(){
+    if(!stream) return null; const track = stream.getVideoTracks()[0]; let blob=null;
+    if('ImageCapture' in window){ try { const capture = new ImageCapture(track); const bmp = await capture.grabFrame(); full.width = bmp.width; full.height = bmp.height; full.getContext('2d').drawImage(bmp,0,0); blob = await new Promise(res => full.toBlob(res, 'image/jpeg', 0.95)); } catch(e){ blob=null; } }
+    if(!blob){ full.width = video.videoWidth; full.height = video.videoHeight; full.getContext('2d').drawImage(video,0,0); blob = await new Promise(res => full.toBlob(res, 'image/jpeg', 0.95)); }
+    return blob;
+  }
+
+  function addThumb(blob){ const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=url; a.download='capture.jpg'; a.title='Download'; const img=document.createElement('img'); img.src=url; img.style.width='100%'; img.style.borderRadius='10px'; img.loading='lazy'; a.appendChild(img); thumbs.prepend(a); }
+
+  // Kick off analysis loop after cv is ready
+  waitForCV().then(()=>{ status('OpenCV ready — start camera', '#10b981'); });
+  setInterval(()=>{ if(stream) tick(); }, +tickMs.value || 120);
 })();
 </script>
 </body>
