@@ -1,0 +1,624 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Blur‑Guard MVP (PWA)</title>
+  <meta name="theme-color" content="#0b1020" />
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <style>
+    :root { --ok:#16a34a; --warn:#f59e0b; --bad:#ef4444; --bg:#0b1020; --card:#0f172a; --fg:#e5e7eb; }
+    html,body { height:100%; margin:0; background:var(--bg); color:var(--fg); font:16px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    .wrap { max-width:980px; margin:0 auto; padding:16px; }
+    .grid { display:grid; gap:16px; grid-template-columns: 1fr; }
+    @media(min-width:900px){ .grid{ grid-template-columns: 2fr 1fr; } }
+    .card { background:var(--card); border-radius:16px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,.3); }
+    .btn { cursor:pointer; border:0; border-radius:12px; padding:12px 16px; font-weight:600; color:white; background:#3b82f6; }
+    .btn:disabled{ opacity:.5; cursor:not-allowed; }
+    .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+    .pill { border-radius:999px; padding:6px 12px; font-weight:700; }
+    .dot { width:14px; height:14px; border-radius:50%; display:inline-block; margin-right:8px; vertical-align:middle; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .meter { height:12px; background:#1f2937; border-radius:999px; overflow:hidden; }
+    .meter > div { height:100%; background:linear-gradient(90deg, var(--bad), var(--warn), var(--ok)); width:0%; transition:width .15s linear; }
+    .thumbs { display:grid; grid-template-columns: repeat(auto-fill, minmax(140px,1fr)); gap:10px; }
+    .hint { opacity:.8; font-size:.9rem }
+    .footer { opacity:.6; font-size:.85rem; margin-top:8px }
+    .next { background:#10b981 }
+    .banner { background:#111827; border:1px solid #1f2937; padding:10px 12px; border-radius:10px; margin:10px 0; }
+    .install { background:#0ea5e9 }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Blur‑Guard MVP (Web + PWA)</h1>
+    <p class="hint">Mobile‑web app that only <b>accepts sharp photos</b>. Works offline once installed. Analyzes on‑device; no backend.</p>
+
+    <div id="iosBanner" class="banner" style="display:none">
+      <b>Tip (iPhone):</b> For the best experience, tap <b>Share</b> → <b>Add to Home Screen</b>, then open from the Home Screen.
+    </div>
+
+    <div class="grid">
+      <section class="card">
+        <div class="row">
+          <button id="startBtn" class="btn">Start camera</button>
+          <button id="snapBtn" class="btn" disabled>Manual capture</button>
+          <button id="nextBtn" class="btn next" disabled>Next step →</button>
+          <button id="installBtn" class="btn install" style="display:none">Install app</button>
+          <input id="fileInput" type="file" accept="image/*;capture=camera" style="display:none" />
+          <button id="fallbackBtn" class="btn" style="background:#6b7280">Upload photo (fallback)</button>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <span id="statusPill" class="pill" style="background:#1f2937">status: <span id="statusTxt">idle</span></span>
+          <span class="pill" style="background:#111827">sharpness: <span id="scoreTxt" class="mono">—</span></span>
+          <span class="pill" style="background:#111827">mode: <span id="modeTxt" class="mono">auto‑snap</span></span>
+        </div>
+
+        <div style="margin-top:12px" class="meter"><div id="meterFill"></div></div>
+        <div class="footer">Green bar = sharper. Auto‑snap after ~0.4s of stable green.</div>
+
+        <div style="position:relative; margin-top:12px">
+          <video id="video" autoplay playsinline muted style="width:100%; border-radius:12px; background:black"></video>
+          <canvas id="work" width="0" height="0" style="display:none"></canvas>
+          <canvas id="full" width="0" height="0" style="display:none"></canvas>
+        </div>
+      </section>
+
+      <aside class="card">
+        <h3>Accepted photos</h3>
+        <div id="thumbs" class="thumbs"></div>
+        <div style="margin-top:10px" class="hint">Only sharp photos appear here. Tap a thumbnail to download.</div>
+      </aside>
+    </div>
+
+    <details class="card" style="margin-top:16px">
+      <summary><b>Settings (tune if needed)</b></summary>
+      <div class="row" style="margin-top:10px">
+        <label>Downsample max side: <input id="dsInput" type="number" value="256" class="mono" style="width:90px"></label>
+        <label>Stable ms: <input id="stableMs" type="number" value="400" class="mono" style="width:90px"></label>
+        <label>Frame interval ms: <input id="tickMs" type="number" value="150" class="mono" style="width:110px"></label>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <label>Cold‑start thresholds (512px equiv):</label>
+        <span class="pill" style="background:#111827">VoL &gt; <input id="volTh" type="number" value="120" class="mono" style="width:70px"></span>
+        <span class="pill" style="background:#111827">Tenengrad &gt; <input id="tenTh" type="number" value="8" class="mono" style="width:70px"></span>
+      </div>
+    </details>
+
+    <p class="footer">Deploy anywhere with HTTPS (GitHub Pages, Vercel, Netlify, Cloudflare). Mobile browsers require HTTPS for camera access.</p>
+  </div>
+
+<script>
+(function(){
+  // --- PWA: dynamic manifest + service worker (works from single file) ---
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+  if(isIOS && !isStandalone){ document.getElementById('iosBanner').style.display='block'; }
+
+  function makeIcon(size){
+    const c=document.createElement('canvas'); c.width=c.height=size; const g=c.getContext('2d');
+    g.fillStyle='#0f172a'; g.fillRect(0,0,size,size);
+    g.fillStyle='#3b82f6'; g.font=`${Math.round(size*0.5)}px 700 system-ui`; g.textAlign='center'; g.textBaseline='middle';
+    g.fillText('BG', size/2, size/2+size*0.06);
+    return c.toDataURL('image/png');
+  }
+  const manifest = { name:'Blur‑Guard', short_name:'BlurGuard', start_url:'.', display:'standalone', background_color:'#0b1020', theme_color:'#0b1020',
+    icons:[{src:makeIcon(192),sizes:'192x192',type:'image/png'},{src:makeIcon(512),sizes:'512x512',type:'image/png'}] };
+  const manBlob = new Blob([JSON.stringify(manifest)], {type:'application/json'});
+  const manUrl = URL.createObjectURL(manBlob);
+  const mlink = document.createElement('link'); mlink.rel='manifest'; mlink.href=manUrl; document.head.appendChild(mlink);
+
+  if('serviceWorker' in navigator){
+    const swCode = `
+      self.addEventListener('install', e => {
+        e.waitUntil(caches.open('blur-guard-v1').then(c => c.addAll(['./'])));
+        self.skipWaiting();
+      });
+      self.addEventListener('activate', e => self.clients.claim());
+      self.addEventListener('fetch', e => {
+        e.respondWith(
+          fetch(e.request).catch(()=>caches.match(e.request).then(r=> r || caches.match('./')))
+        );
+      });`;
+    const swBlob = new Blob([swCode], {type:'text/javascript'});
+    const swUrl = URL.createObjectURL(swBlob);
+    navigator.serviceWorker.register(swUrl).catch(()=>{});
+  }
+
+  // Install prompt (Android/Chrome)
+  let deferredPrompt=null; const installBtn=document.getElementById('installBtn');
+  window.addEventListener('beforeinstallprompt', (e)=>{ e.preventDefault(); deferredPrompt=e; installBtn.style.display='inline-block'; });
+  installBtn.onclick = async ()=>{ if(!deferredPrompt) return; deferredPrompt.prompt(); await deferredPrompt.userChoice; installBtn.style.display='none'; };
+})();
+</script>
+
+<script>
+(function(){
+  const video = document.getElementById('video');
+  const work = document.getElementById('work'); // small analysis canvas
+  const full = document.getElementById('full'); // full-res capture
+  const startBtn = document.getElementById('startBtn');
+  const snapBtn = document.getElementById('snapBtn');
+  const nextBtn = document.getElementById('nextBtn');
+  const statusTxt = document.getElementById('statusTxt');
+  const statusPill = document.getElementById('statusPill');
+  const scoreTxt = document.getElementById('scoreTxt');
+  const meterFill = document.getElementById('meterFill');
+  const modeTxt = document.getElementById('modeTxt');
+  const thumbs = document.getElementById('thumbs');
+  const dsInput = document.getElementById('dsInput');
+  const stableMs = document.getElementById('stableMs');
+  const tickMs = document.getElementById('tickMs');
+  const volTh = document.getElementById('volTh');
+  const tenTh = document.getElementById('tenTh');
+  const fileInput = document.getElementById('fileInput');
+  const fallbackBtn = document.getElementById('fallbackBtn');
+
+  let stream = null, timer = null, lastSharpTs = 0, accepting = true;
+
+  startBtn.onclick = async () => {
+    try {
+      startBtn.disabled = true;
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } }, audio:false });
+      video.srcObject = stream;
+      await video.play();
+      snapBtn.disabled = false;
+      status('analyzing…', '#f59e0b');
+      startLoop();
+    } catch (e) {
+      alert('Camera error: '+e.message+'
+Try using HTTPS or allow camera permissions.');
+      startBtn.disabled = false;
+    }
+  };
+
+  snapBtn.onclick = () => manualCapture();
+  nextBtn.onclick = () => alert('Proceeding to the next step… (hook your flow here)');
+  fallbackBtn.onclick = () => fileInput.click();
+  fileInput.onchange = async (e)=>{
+    const f = e.target.files && e.target.files[0]; if(!f) return;
+    const blob = f;
+    const ok = await validateBlob(blob);
+    if(!ok){ alert('Too blurry — please retake.'); return; }
+    addThumb(blob); nextBtn.disabled = false;
+  };
+
+  function startLoop(){ if(timer) clearInterval(timer); timer = setInterval(tick, +tickMs.value || 150); }
+
+  async function tick(){
+    if(!video.videoWidth) return;
+    const maxSide = +dsInput.value || 256;
+    const w = video.videoWidth, h = video.videoHeight;
+    const scale = Math.max(w,h)/maxSide;
+    const nw = Math.max(1, Math.round(w/scale));
+    const nh = Math.max(1, Math.round(h/scale));
+
+    work.width = nw; work.height = nh;
+    const g = work.getContext('2d', { willReadFrequently:true });
+    g.drawImage(video, 0, 0, nw, nh);
+    const img = g.getImageData(0,0,nw,nh);
+
+    const gray = toGray(img.data); // Uint8
+    const vol = varianceOfLaplacian(gray, nw, nh);
+    const ten = tenengrad(gray, nw, nh);
+
+    const zVol = zscore(volStats, vol);
+    const zTen = zscore(tenStats, ten);
+    const score = 0.6 * zVol + 0.4 * zTen;
+
+    const cold = volStats.n < 20 || tenStats.n < 20;
+    const pass = cold ? (vol > (+volTh.value||120) && ten > (+tenTh.value||8)) : (score > 0);
+
+    scoreTxt.textContent = score.toFixed(2);
+    meterFill.style.width = Math.max(0, Math.min(100, 50 + score*12)) + '%';
+
+    if(pass){
+      status('sharp', '#16a34a');
+      if(accepting){
+        const msStable = +stableMs.value || 400;
+        if(lastSharpTs === 0) lastSharpTs = performance.now();
+        else if(performance.now() - lastSharpTs >= msStable){
+          accepting = false; // avoid double fires
+          await autoCapture();
+          setTimeout(()=>{ accepting = true; lastSharpTs = 0; }, 600);
+        }
+      }
+    } else {
+      status('blurry — hold still / tap to focus', '#ef4444');
+      lastSharpTs = 0;
+    }
+  }
+
+  async function autoCapture(){
+    modeTxt.textContent = 'auto‑snap';
+    const blob = await grabFrameBlob();
+    if(!blob) return;
+    addThumb(blob);
+    nextBtn.disabled = false;
+  }
+
+  async function manualCapture(){
+    modeTxt.textContent = 'manual';
+    const blob = await grabFrameBlob();
+    if(!blob) return;
+    const ok = await validateBlob(blob);
+    if(!ok){ alert('Too blurry — please retake.'); return; }
+    addThumb(blob); nextBtn.disabled = false;
+  }
+
+  async function grabFrameBlob(){
+    if(!stream){ return null; }
+    const track = stream.getVideoTracks()[0];
+    let blob=null;
+    if('ImageCapture' in window){
+      try {
+        const capture = new ImageCapture(track);
+        const bmp = await capture.grabFrame();
+        full.width = bmp.width; full.height = bmp.height;
+        full.getContext('2d').drawImage(bmp,0,0);
+        blob = await new Promise(res => full.toBlob(res, 'image/jpeg', 0.92));
+      } catch(e){ blob = null; }
+    }
+    if(!blob){
+      full.width = video.videoWidth; full.height = video.videoHeight;
+      full.getContext('2d').drawImage(video,0,0);
+      blob = await new Promise(res => full.toBlob(res, 'image/jpeg', 0.92));
+    }
+    return blob;
+  }
+
+  async function validateBlob(blob){
+    const bmp = await createImageBitmap(blob);
+    const maxSide = 512; // analysis size
+    const scale = Math.max(bmp.width, bmp.height)/maxSide;
+    const nw = Math.max(1, Math.round(bmp.width/scale));
+    const nh = Math.max(1, Math.round(bmp.height/scale));
+    work.width = nw; work.height = nh;
+    const g = work.getContext('2d', { willReadFrequently:true });
+    g.drawImage(bmp, 0,0,nw,nh);
+    const img = g.getImageData(0,0,nw,nh);
+    const gray = toGray(img.data);
+    const vol = varianceOfLaplacian(gray, nw, nh);
+    const ten = tenengrad(gray, nw, nh);
+    const cold = volStats.n < 20 || tenStats.n < 20;
+    const pass = cold ? (vol > (+volTh.value||120) && ten > (+tenTh.value||8)) : (0.6*zscore(volStats,vol)+0.4*zscore(tenStats,ten) > 0);
+    return pass;
+  }
+
+  function addThumb(blob){
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'capture.jpg'; a.title = 'Tap to download';
+    const img = document.createElement('img'); img.src = url; img.style.width='100%'; img.style.borderRadius='10px'; img.loading='lazy';
+    a.appendChild(img); thumbs.prepend(a);
+  }
+
+  function status(text, color){ statusTxt.textContent = text; statusPill.style.background = color; }
+
+  // === Sharpness metrics ===
+  function toGray(rgba){ const n = rgba.length/4; const out = new Uint8Array(n); for(let i=0,j=0;i<n;i++,j+=4){ out[i] = (0.2126*rgba[j] + 0.7152*rgba[j+1] + 0.0722*rgba[j+2])|0; } return out; }
+
+  function varianceOfLaplacian(gray, w, h){ const k = [0,1,0, 1,-4,1, 0,1,0]; let sum=0, sum2=0, n=0; for(let y=1;y<h-1;y++){ for(let x=1;x<w-1;x++){ let acc=0, ki=0; for(let dy=-1; dy<=1; dy++){ const row=(y+dy)*w; for(let dx=-1; dx<=1; dx++) acc += gray[row + (x+dx)] * k[ki++]; } sum += acc; sum2 += acc*acc; n++; } } const mean = sum/n; return (sum2/n) - mean*mean; }
+
+  function tenengrad(gray, w, h){ const sx=[-1,0,1,-2,0,2,-1,0,1]; const sy=[-1,-2,-1,0,0,0,1,2,1]; let sum=0, n=0; for(let y=1;y<h-1;y++){ for(let x=1;x<w-1;x++){ let gx=0, gy=0, ki=0; for(let dy=-1; dy<=1; dy++){ const row=(y+dy)*w; for(let dx=-1; dx<=1; dx++){ const p = gray[row + (x+dx)]; gx += p * sx[ki]; gy += p * sy[ki]; ki++; } } const g2 = gx*gx + gy*gy; sum += g2; n++; } } return sum/n; }
+
+  // Rolling z-score stats per metric
+  const volStats = { n:0, mean:0, m2:0 };
+  const tenStats = { n:0, mean:0, m2:0 };
+  function zscore(stats, x){ stats.n++; const d = x - stats.mean; stats.mean += d / stats.n; const d2 = x - stats.mean; stats.m2 += d * d2; const v = (stats.n>1) ? (stats.m2 / (stats.n-1)) : 1e-6; const sd = Math.sqrt(Math.max(v, 1e-6)); return (x - stats.mean) / sd; }
+})();
+</script>
+</body>
+</html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Blur‑Guard MVP (PWA)</title>
+  <meta name="theme-color" content="#0b1020" />
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <style>
+    :root { --ok:#16a34a; --warn:#f59e0b; --bad:#ef4444; --bg:#0b1020; --card:#0f172a; --fg:#e5e7eb; }
+    html,body { height:100%; margin:0; background:var(--bg); color:var(--fg); font:16px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    .wrap { max-width:980px; margin:0 auto; padding:16px; }
+    .grid { display:grid; gap:16px; grid-template-columns: 1fr; }
+    @media(min-width:900px){ .grid{ grid-template-columns: 2fr 1fr; } }
+    .card { background:var(--card); border-radius:16px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,.3); }
+    .btn { cursor:pointer; border:0; border-radius:12px; padding:12px 16px; font-weight:600; color:white; background:#3b82f6; }
+    .btn:disabled{ opacity:.5; cursor:not-allowed; }
+    .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+    .pill { border-radius:999px; padding:6px 12px; font-weight:700; }
+    .dot { width:14px; height:14px; border-radius:50%; display:inline-block; margin-right:8px; vertical-align:middle; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .meter { height:12px; background:#1f2937; border-radius:999px; overflow:hidden; }
+    .meter > div { height:100%; background:linear-gradient(90deg, var(--bad), var(--warn), var(--ok)); width:0%; transition:width .15s linear; }
+    .thumbs { display:grid; grid-template-columns: repeat(auto-fill, minmax(140px,1fr)); gap:10px; }
+    .hint { opacity:.8; font-size:.9rem }
+    .footer { opacity:.6; font-size:.85rem; margin-top:8px }
+    .next { background:#10b981 }
+    .banner { background:#111827; border:1px solid #1f2937; padding:10px 12px; border-radius:10px; margin:10px 0; }
+    .install { background:#0ea5e9 }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Blur‑Guard MVP (Web + PWA)</h1>
+    <p class="hint">Mobile‑web app that only <b>accepts sharp photos</b>. Works offline once installed. Analyzes on‑device; no backend.</p>
+
+    <div id="iosBanner" class="banner" style="display:none">
+      <b>Tip (iPhone):</b> For the best experience, tap <b>Share</b> → <b>Add to Home Screen</b>, then open from the Home Screen.
+    </div>
+
+    <div class="grid">
+      <section class="card">
+        <div class="row">
+          <button id="startBtn" class="btn">Start camera</button>
+          <button id="snapBtn" class="btn" disabled>Manual capture</button>
+          <button id="nextBtn" class="btn next" disabled>Next step →</button>
+          <button id="installBtn" class="btn install" style="display:none">Install app</button>
+          <input id="fileInput" type="file" accept="image/*;capture=camera" style="display:none" />
+          <button id="fallbackBtn" class="btn" style="background:#6b7280">Upload photo (fallback)</button>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <span id="statusPill" class="pill" style="background:#1f2937">status: <span id="statusTxt">idle</span></span>
+          <span class="pill" style="background:#111827">sharpness: <span id="scoreTxt" class="mono">—</span></span>
+          <span class="pill" style="background:#111827">mode: <span id="modeTxt" class="mono">auto‑snap</span></span>
+        </div>
+
+        <div style="margin-top:12px" class="meter"><div id="meterFill"></div></div>
+        <div class="footer">Green bar = sharper. Auto‑snap after ~0.4s of stable green.</div>
+
+        <div style="position:relative; margin-top:12px">
+          <video id="video" autoplay playsinline muted style="width:100%; border-radius:12px; background:black"></video>
+          <canvas id="work" width="0" height="0" style="display:none"></canvas>
+          <canvas id="full" width="0" height="0" style="display:none"></canvas>
+        </div>
+      </section>
+
+      <aside class="card">
+        <h3>Accepted photos</h3>
+        <div id="thumbs" class="thumbs"></div>
+        <div style="margin-top:10px" class="hint">Only sharp photos appear here. Tap a thumbnail to download.</div>
+      </aside>
+    </div>
+
+    <details class="card" style="margin-top:16px">
+      <summary><b>Settings (tune if needed)</b></summary>
+      <div class="row" style="margin-top:10px">
+        <label>Downsample max side: <input id="dsInput" type="number" value="256" class="mono" style="width:90px"></label>
+        <label>Stable ms: <input id="stableMs" type="number" value="400" class="mono" style="width:90px"></label>
+        <label>Frame interval ms: <input id="tickMs" type="number" value="150" class="mono" style="width:110px"></label>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <label>Cold‑start thresholds (512px equiv):</label>
+        <span class="pill" style="background:#111827">VoL &gt; <input id="volTh" type="number" value="120" class="mono" style="width:70px"></span>
+        <span class="pill" style="background:#111827">Tenengrad &gt; <input id="tenTh" type="number" value="8" class="mono" style="width:70px"></span>
+      </div>
+    </details>
+
+    <p class="footer">Deploy anywhere with HTTPS (GitHub Pages, Vercel, Netlify, Cloudflare). Mobile browsers require HTTPS for camera access.</p>
+  </div>
+
+<script>
+(function(){
+  // --- PWA: dynamic manifest + service worker (works from single file) ---
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+  if(isIOS && !isStandalone){ document.getElementById('iosBanner').style.display='block'; }
+
+  function makeIcon(size){
+    const c=document.createElement('canvas'); c.width=c.height=size; const g=c.getContext('2d');
+    g.fillStyle='#0f172a'; g.fillRect(0,0,size,size);
+    g.fillStyle='#3b82f6'; g.font=`${Math.round(size*0.5)}px 700 system-ui`; g.textAlign='center'; g.textBaseline='middle';
+    g.fillText('BG', size/2, size/2+size*0.06);
+    return c.toDataURL('image/png');
+  }
+  const manifest = { name:'Blur‑Guard', short_name:'BlurGuard', start_url:'.', display:'standalone', background_color:'#0b1020', theme_color:'#0b1020',
+    icons:[{src:makeIcon(192),sizes:'192x192',type:'image/png'},{src:makeIcon(512),sizes:'512x512',type:'image/png'}] };
+  const manBlob = new Blob([JSON.stringify(manifest)], {type:'application/json'});
+  const manUrl = URL.createObjectURL(manBlob);
+  const mlink = document.createElement('link'); mlink.rel='manifest'; mlink.href=manUrl; document.head.appendChild(mlink);
+
+  if('serviceWorker' in navigator){
+    const swCode = `
+      self.addEventListener('install', e => {
+        e.waitUntil(caches.open('blur-guard-v1').then(c => c.addAll(['./'])));
+        self.skipWaiting();
+      });
+      self.addEventListener('activate', e => self.clients.claim());
+      self.addEventListener('fetch', e => {
+        e.respondWith(
+          fetch(e.request).catch(()=>caches.match(e.request).then(r=> r || caches.match('./')))
+        );
+      });`;
+    const swBlob = new Blob([swCode], {type:'text/javascript'});
+    const swUrl = URL.createObjectURL(swBlob);
+    navigator.serviceWorker.register(swUrl).catch(()=>{});
+  }
+
+  // Install prompt (Android/Chrome)
+  let deferredPrompt=null; const installBtn=document.getElementById('installBtn');
+  window.addEventListener('beforeinstallprompt', (e)=>{ e.preventDefault(); deferredPrompt=e; installBtn.style.display='inline-block'; });
+  installBtn.onclick = async ()=>{ if(!deferredPrompt) return; deferredPrompt.prompt(); await deferredPrompt.userChoice; installBtn.style.display='none'; };
+})();
+</script>
+
+<script>
+(function(){
+  const video = document.getElementById('video');
+  const work = document.getElementById('work'); // small analysis canvas
+  const full = document.getElementById('full'); // full-res capture
+  const startBtn = document.getElementById('startBtn');
+  const snapBtn = document.getElementById('snapBtn');
+  const nextBtn = document.getElementById('nextBtn');
+  const statusTxt = document.getElementById('statusTxt');
+  const statusPill = document.getElementById('statusPill');
+  const scoreTxt = document.getElementById('scoreTxt');
+  const meterFill = document.getElementById('meterFill');
+  const modeTxt = document.getElementById('modeTxt');
+  const thumbs = document.getElementById('thumbs');
+  const dsInput = document.getElementById('dsInput');
+  const stableMs = document.getElementById('stableMs');
+  const tickMs = document.getElementById('tickMs');
+  const volTh = document.getElementById('volTh');
+  const tenTh = document.getElementById('tenTh');
+  const fileInput = document.getElementById('fileInput');
+  const fallbackBtn = document.getElementById('fallbackBtn');
+
+  let stream = null, timer = null, lastSharpTs = 0, accepting = true;
+
+  startBtn.onclick = async () => {
+    try {
+      startBtn.disabled = true;
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } }, audio:false });
+      video.srcObject = stream;
+      await video.play();
+      snapBtn.disabled = false;
+      status('analyzing…', '#f59e0b');
+      startLoop();
+    } catch (e) {
+      alert('Camera error: '+e.message+'
+Try using HTTPS or allow camera permissions.');
+      startBtn.disabled = false;
+    }
+  };
+
+  snapBtn.onclick = () => manualCapture();
+  nextBtn.onclick = () => alert('Proceeding to the next step… (hook your flow here)');
+  fallbackBtn.onclick = () => fileInput.click();
+  fileInput.onchange = async (e)=>{
+    const f = e.target.files && e.target.files[0]; if(!f) return;
+    const blob = f;
+    const ok = await validateBlob(blob);
+    if(!ok){ alert('Too blurry — please retake.'); return; }
+    addThumb(blob); nextBtn.disabled = false;
+  };
+
+  function startLoop(){ if(timer) clearInterval(timer); timer = setInterval(tick, +tickMs.value || 150); }
+
+  async function tick(){
+    if(!video.videoWidth) return;
+    const maxSide = +dsInput.value || 256;
+    const w = video.videoWidth, h = video.videoHeight;
+    const scale = Math.max(w,h)/maxSide;
+    const nw = Math.max(1, Math.round(w/scale));
+    const nh = Math.max(1, Math.round(h/scale));
+
+    work.width = nw; work.height = nh;
+    const g = work.getContext('2d', { willReadFrequently:true });
+    g.drawImage(video, 0, 0, nw, nh);
+    const img = g.getImageData(0,0,nw,nh);
+
+    const gray = toGray(img.data); // Uint8
+    const vol = varianceOfLaplacian(gray, nw, nh);
+    const ten = tenengrad(gray, nw, nh);
+
+    const zVol = zscore(volStats, vol);
+    const zTen = zscore(tenStats, ten);
+    const score = 0.6 * zVol + 0.4 * zTen;
+
+    const cold = volStats.n < 20 || tenStats.n < 20;
+    const pass = cold ? (vol > (+volTh.value||120) && ten > (+tenTh.value||8)) : (score > 0);
+
+    scoreTxt.textContent = score.toFixed(2);
+    meterFill.style.width = Math.max(0, Math.min(100, 50 + score*12)) + '%';
+
+    if(pass){
+      status('sharp', '#16a34a');
+      if(accepting){
+        const msStable = +stableMs.value || 400;
+        if(lastSharpTs === 0) lastSharpTs = performance.now();
+        else if(performance.now() - lastSharpTs >= msStable){
+          accepting = false; // avoid double fires
+          await autoCapture();
+          setTimeout(()=>{ accepting = true; lastSharpTs = 0; }, 600);
+        }
+      }
+    } else {
+      status('blurry — hold still / tap to focus', '#ef4444');
+      lastSharpTs = 0;
+    }
+  }
+
+  async function autoCapture(){
+    modeTxt.textContent = 'auto‑snap';
+    const blob = await grabFrameBlob();
+    if(!blob) return;
+    addThumb(blob);
+    nextBtn.disabled = false;
+  }
+
+  async function manualCapture(){
+    modeTxt.textContent = 'manual';
+    const blob = await grabFrameBlob();
+    if(!blob) return;
+    const ok = await validateBlob(blob);
+    if(!ok){ alert('Too blurry — please retake.'); return; }
+    addThumb(blob); nextBtn.disabled = false;
+  }
+
+  async function grabFrameBlob(){
+    if(!stream){ return null; }
+    const track = stream.getVideoTracks()[0];
+    let blob=null;
+    if('ImageCapture' in window){
+      try {
+        const capture = new ImageCapture(track);
+        const bmp = await capture.grabFrame();
+        full.width = bmp.width; full.height = bmp.height;
+        full.getContext('2d').drawImage(bmp,0,0);
+        blob = await new Promise(res => full.toBlob(res, 'image/jpeg', 0.92));
+      } catch(e){ blob = null; }
+    }
+    if(!blob){
+      full.width = video.videoWidth; full.height = video.videoHeight;
+      full.getContext('2d').drawImage(video,0,0);
+      blob = await new Promise(res => full.toBlob(res, 'image/jpeg', 0.92));
+    }
+    return blob;
+  }
+
+  async function validateBlob(blob){
+    const bmp = await createImageBitmap(blob);
+    const maxSide = 512; // analysis size
+    const scale = Math.max(bmp.width, bmp.height)/maxSide;
+    const nw = Math.max(1, Math.round(bmp.width/scale));
+    const nh = Math.max(1, Math.round(bmp.height/scale));
+    work.width = nw; work.height = nh;
+    const g = work.getContext('2d', { willReadFrequently:true });
+    g.drawImage(bmp, 0,0,nw,nh);
+    const img = g.getImageData(0,0,nw,nh);
+    const gray = toGray(img.data);
+    const vol = varianceOfLaplacian(gray, nw, nh);
+    const ten = tenengrad(gray, nw, nh);
+    const cold = volStats.n < 20 || tenStats.n < 20;
+    const pass = cold ? (vol > (+volTh.value||120) && ten > (+tenTh.value||8)) : (0.6*zscore(volStats,vol)+0.4*zscore(tenStats,ten) > 0);
+    return pass;
+  }
+
+  function addThumb(blob){
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'capture.jpg'; a.title = 'Tap to download';
+    const img = document.createElement('img'); img.src = url; img.style.width='100%'; img.style.borderRadius='10px'; img.loading='lazy';
+    a.appendChild(img); thumbs.prepend(a);
+  }
+
+  function status(text, color){ statusTxt.textContent = text; statusPill.style.background = color; }
+
+  // === Sharpness metrics ===
+  function toGray(rgba){ const n = rgba.length/4; const out = new Uint8Array(n); for(let i=0,j=0;i<n;i++,j+=4){ out[i] = (0.2126*rgba[j] + 0.7152*rgba[j+1] + 0.0722*rgba[j+2])|0; } return out; }
+
+  function varianceOfLaplacian(gray, w, h){ const k = [0,1,0, 1,-4,1, 0,1,0]; let sum=0, sum2=0, n=0; for(let y=1;y<h-1;y++){ for(let x=1;x<w-1;x++){ let acc=0, ki=0; for(let dy=-1; dy<=1; dy++){ const row=(y+dy)*w; for(let dx=-1; dx<=1; dx++) acc += gray[row + (x+dx)] * k[ki++]; } sum += acc; sum2 += acc*acc; n++; } } const mean = sum/n; return (sum2/n) - mean*mean; }
+
+  function tenengrad(gray, w, h){ const sx=[-1,0,1,-2,0,2,-1,0,1]; const sy=[-1,-2,-1,0,0,0,1,2,1]; let sum=0, n=0; for(let y=1;y<h-1;y++){ for(let x=1;x<w-1;x++){ let gx=0, gy=0, ki=0; for(let dy=-1; dy<=1; dy++){ const row=(y+dy)*w; for(let dx=-1; dx<=1; dx++){ const p = gray[row + (x+dx)]; gx += p * sx[ki]; gy += p * sy[ki]; ki++; } } const g2 = gx*gx + gy*gy; sum += g2; n++; } } return sum/n; }
+
+  // Rolling z-score stats per metric
+  const volStats = { n:0, mean:0, m2:0 };
+  const tenStats = { n:0, mean:0, m2:0 };
+  function zscore(stats, x){ stats.n++; const d = x - stats.mean; stats.mean += d / stats.n; const d2 = x - stats.mean; stats.m2 += d * d2; const v = (stats.n>1) ? (stats.m2 / (stats.n-1)) : 1e-6; const sd = Math.sqrt(Math.max(v, 1e-6)); return (x - stats.mean) / sd; }
+})();
+</script>
+</body>
+</html>
