@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Blur‑Guard MVP (PWA)</title>
+  <title>Blur‑Guard MVP (Doc Scanner PWA)</title>
   <meta name="theme-color" content="#0b1020" />
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -27,38 +27,42 @@
     .next { background:#10b981 }
     .banner { background:#111827; border:1px solid #1f2937; padding:10px 12px; border-radius:10px; margin:10px 0; }
     .install { background:#0ea5e9 }
+    .overlayWrap { position:relative; margin-top:12px }
+    #overlay { position:absolute; inset:0; pointer-events:none; border-radius:12px }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>Blur‑Guard MVP (Web + PWA)</h1>
-    <p class="hint">Mobile‑web app that only <b>accepts sharp photos</b>. Works offline once installed. On‑device analysis; no backend.</p>
+    <h1>Blur‑Guard MVP (Document Scanner)</h1>
+    <p class="hint">Only accepts photos that pass core checks: <b>sharpness</b>, <b>exposure</b>, <b>glare</b>, <b>coverage ≥ 80%</b>, and <b>reasonable skew</b>. Works offline once installed.</p>
 
     <div id="iosBanner" class="banner" style="display:none">
-      <b>Tip (iPhone):</b> Share → <b>Add to Home Screen</b>, then open from the icon for best camera behavior.
+      <b>Tip (iPhone):</b> Share → <b>Add to Home Screen</b> for best camera behavior.
     </div>
 
     <div class="grid">
       <section class="card">
         <div class="row">
           <button id="startBtn" class="btn">Start camera</button>
-          <button id="snapBtn" class="btn" disabled>Manual capture</button>
+          <button id="snapBtn" class="btn" disabled>Capture</button>
           <button id="nextBtn" class="btn next" disabled>Next step →</button>
           <button id="installBtn" class="btn install" style="display:none">Install app</button>
           <input id="fileInput" type="file" accept="image/*;capture=camera" style="display:none" />
-          <button id="fallbackBtn" class="btn" style="background:#6b7280">Upload photo (fallback)</button>
+          <button id="fallbackBtn" class="btn" style="background:#6b7280">Upload (fallback)</button>
         </div>
         <div class="row" style="margin-top:10px">
           <span id="statusPill" class="pill" style="background:#1f2937">status: <span id="statusTxt">idle</span></span>
-          <span class="pill" style="background:#111827">sharpness: <span id="scoreTxt" class="mono">—</span></span>
-          <span class="pill" style="background:#111827">mode: <span id="modeTxt" class="mono">auto‑snap</span></span>
+          <span class="pill" style="background:#111827">score: <span id="scoreTxt" class="mono">—</span></span>
+          <span class="pill" style="background:#111827">coverage: <span id="covTxt" class="mono">—</span></span>
+          <span class="pill" style="background:#111827">mode: <span id="modeTxt" class="mono">manual</span></span>
         </div>
 
         <div style="margin-top:12px" class="meter"><div id="meterFill"></div></div>
-        <div class="footer">Green bar = sharper. Auto‑snap after ~0.4s of stable green.</div>
+        <div class="footer">Green = sharper. Overlay box shows target (~85%); detected page will outline in green.</div>
 
-        <div style="position:relative; margin-top:12px">
+        <div class="overlayWrap">
           <video id="video" autoplay playsinline muted style="width:100%; border-radius:12px; background:black"></video>
+          <canvas id="overlay"></canvas>
           <canvas id="work" width="0" height="0" style="display:none"></canvas>
           <canvas id="full" width="0" height="0" style="display:none"></canvas>
         </div>
@@ -67,56 +71,47 @@
       <aside class="card">
         <h3>Accepted photos</h3>
         <div id="thumbs" class="thumbs"></div>
-        <div style="margin-top:10px" class="hint">Only sharp photos appear here. Tap a thumbnail to download.</div>
+        <div class="hint">Tap a thumbnail to download.</div>
       </aside>
     </div>
 
     <details class="card" style="margin-top:16px">
-      <summary><b>Settings (tune if needed)</b></summary>
+      <summary><b>Settings</b></summary>
       <div class="row" style="margin-top:10px">
-        <label>Downsample max side: <input id="dsInput" type="number" value="256" class="mono" style="width:90px"></label>
-        <label>Stable ms: <input id="stableMs" type="number" value="400" class="mono" style="width:90px"></label>
+        <label>Analysis max side: <input id="dsInput" type="number" value="256" class="mono" style="width:90px"></label>
+        <label>Stable ms (auto): <input id="stableMs" type="number" value="400" class="mono" style="width:90px"></label>
         <label>Frame interval ms: <input id="tickMs" type="number" value="150" class="mono" style="width:110px"></label>
       </div>
       <div class="row" style="margin-top:10px">
-        <label>Cold‑start thresholds (512px equiv):</label>
+        <label>Blur thresholds (512px equiv):</label>
         <span class="pill" style="background:#111827">VoL &gt; <input id="volTh" type="number" value="120" class="mono" style="width:70px"></span>
         <span class="pill" style="background:#111827">Tenengrad &gt; <input id="tenTh" type="number" value="8" class="mono" style="width:70px"></span>
       </div>
+      <div class="row" style="margin-top:10px">
+        <span class="pill" style="background:#111827">Min coverage: <input id="covTh" type="number" value="0.80" step="0.05" class="mono" style="width:80px"></span>
+        <span class="pill" style="background:#111827">Max skew (°): <input id="skewTh" type="number" value="12" class="mono" style="width:80px"></span>
+        <span class="pill" style="background:#111827">Glare max area: <input id="glareTh" type="number" value="0.03" step="0.01" class="mono" style="width:80px"></span>
+      </div>
     </details>
 
-    <p class="footer">Serve via <b>HTTPS</b> (or <code>http://localhost</code>) or camera will be blocked.</p>
+    <p class="footer">Use <b>HTTPS</b> (or <code>http://localhost</code>) for camera access.</p>
   </div>
 
 <script>
-// --- PWA bits: manifest + service worker in one file ---
+// PWA: manifest + service worker inline
 (function(){
   const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
   const isStandalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
   if(isIOS && !isStandalone){ document.getElementById('iosBanner').style.display='block'; }
-
-  // Minimal generated icon + manifest
-  function makeIcon(size){
-    const c=document.createElement('canvas'); c.width=c.height=size; const g=c.getContext('2d');
-    g.fillStyle='#0f172a'; g.fillRect(0,0,size,size);
-    g.fillStyle='#3b82f6'; g.font=`${Math.round(size*0.5)}px 700 system-ui`; g.textAlign='center'; g.textBaseline='middle';
-    g.fillText('BG', size/2, size/2+size*0.06);
-    return c.toDataURL('image/png');
-  }
-  const manifest = { name:'Blur‑Guard', short_name:'BlurGuard', start_url:'.', display:'standalone', background_color:'#0b1020', theme_color:'#0b1020',
-    icons:[{src:makeIcon(192),sizes:'192x192',type:'image/png'},{src:makeIcon(512),sizes:'512x512',type:'image/png'}] };
+  function makeIcon(size){ const c=document.createElement('canvas'); c.width=c.height=size; const g=c.getContext('2d'); g.fillStyle='#0f172a'; g.fillRect(0,0,size,size); g.fillStyle='#3b82f6'; g.font=`${Math.round(size*0.5)}px 700 system-ui`; g.textAlign='center'; g.textBaseline='middle'; g.fillText('BG', size/2, size/2+size*0.06); return c.toDataURL('image/png'); }
+  const manifest = { name:'Blur‑Guard', short_name:'BlurGuard', start_url:'.', display:'standalone', background_color:'#0b1020', theme_color:'#0b1020', icons:[{src:makeIcon(192),sizes:'192x192',type:'image/png'},{src:makeIcon(512),sizes:'512x512',type:'image/png'}] };
   const manUrl = URL.createObjectURL(new Blob([JSON.stringify(manifest)], {type:'application/json'}));
   const mlink = document.createElement('link'); mlink.rel='manifest'; mlink.href=manUrl; document.head.appendChild(mlink);
-
   if('serviceWorker' in navigator){
-    const swCode = `self.addEventListener('install',e=>{e.waitUntil(caches.open('blur-guard-v1').then(c=>c.addAll(['./'])));self.skipWaiting();});
-self.addEventListener('activate',e=>self.clients.claim());
-self.addEventListener('fetch',e=>{e.respondWith(fetch(e.request).catch(()=>caches.match(e.request).then(r=>r||caches.match('./'))))});`;
+    const swCode = `self.addEventListener('install',e=>{e.waitUntil(caches.open('blur-guard-v2').then(c=>c.addAll(['./'])));self.skipWaiting();});self.addEventListener('activate',e=>self.clients.claim());self.addEventListener('fetch',e=>{e.respondWith(fetch(e.request).catch(()=>caches.match(e.request).then(r=>r||caches.match('./'))))});`;
     const swUrl = URL.createObjectURL(new Blob([swCode], {type:'text/javascript'}));
     navigator.serviceWorker.register(swUrl).catch(()=>{});
   }
-
-  // Install prompt on Android/Chrome
   let deferredPrompt=null; const installBtn=document.getElementById('installBtn');
   window.addEventListener('beforeinstallprompt', (e)=>{ e.preventDefault(); deferredPrompt=e; installBtn.style.display='inline-block'; });
   installBtn.onclick = async ()=>{ if(!deferredPrompt) return; deferredPrompt.prompt(); await deferredPrompt.userChoice; installBtn.style.display='none'; };
@@ -124,9 +119,10 @@ self.addEventListener('fetch',e=>{e.respondWith(fetch(e.request).catch(()=>cache
 </script>
 
 <script>
-// --- Main app logic ---
+// Main app logic with core checks + document detection overlay
 (function(){
   const video = document.getElementById('video');
+  const overlay = document.getElementById('overlay');
   const work = document.getElementById('work');
   const full = document.getElementById('full');
   const startBtn = document.getElementById('startBtn');
@@ -135,172 +131,209 @@ self.addEventListener('fetch',e=>{e.respondWith(fetch(e.request).catch(()=>cache
   const statusTxt = document.getElementById('statusTxt');
   const statusPill = document.getElementById('statusPill');
   const scoreTxt = document.getElementById('scoreTxt');
+  const covTxt = document.getElementById('covTxt');
   const meterFill = document.getElementById('meterFill');
-  const modeTxt = document.getElementById('modeTxt');
-  const thumbs = document.getElementById('thumbs');
   const dsInput = document.getElementById('dsInput');
   const stableMs = document.getElementById('stableMs');
   const tickMs = document.getElementById('tickMs');
   const volTh = document.getElementById('volTh');
   const tenTh = document.getElementById('tenTh');
+  const covTh = document.getElementById('covTh');
+  const skewTh = document.getElementById('skewTh');
+  const glareTh = document.getElementById('glareTh');
   const fileInput = document.getElementById('fileInput');
   const fallbackBtn = document.getElementById('fallbackBtn');
+
+  // rolling stats for sharpness
+  const volStats = { n:0, mean:0, m2:0 };
+  const tenStats = { n:0, mean:0, m2:0 };
+  function zscore(stats, x){ stats.n++; const d = x - stats.mean; stats.mean += d / stats.n; const d2 = x - stats.mean; stats.m2 += d * d2; const v = (stats.n>1) ? (stats.m2 / (stats.n-1)) : 1e-6; const sd = Math.sqrt(Math.max(v, 1e-6)); return (x - stats.mean) / sd; }
 
   let stream=null, timer=null, lastSharpTs=0, accepting=true;
 
   startBtn.onclick = async () => {
     try {
       startBtn.disabled = true;
-      // Works only on HTTPS or http://localhost
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } },
-        audio: false
-      });
-      video.srcObject = stream;
-      await video.play();
-      snapBtn.disabled = false;
-      status('analyzing…', '#f59e0b');
-      startLoop();
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio:false });
+      video.srcObject = stream; await video.play();
+      resizeOverlay(); window.addEventListener('resize', resizeOverlay);
+      snapBtn.disabled = false; status('analyzing…', '#f59e0b'); startLoop();
     } catch (e) {
       alert(`Camera error: ${e.message}
-Use HTTPS (or localhost) and allow camera permissions. If in an in‑app browser, open in Chrome/Safari.`);
-      console.error('getUserMedia failed:', e);
+Use HTTPS (or localhost). If in an in‑app browser, open in Chrome/Safari and allow camera.`);
       startBtn.disabled = false;
     }
   };
 
-  snapBtn.onclick = () => manualCapture();
-  nextBtn.onclick = () => alert('Proceeding to the next step… (hook your flow here)');
+  snapBtn.onclick = () => captureAndValidate();
+  nextBtn.onclick = () => alert('Proceed to next step… (hook your flow)');
   fallbackBtn.onclick = () => fileInput.click();
-  fileInput.onchange = async (e)=>{
-    const f = e.target.files && e.target.files[0]; if(!f) return;
-    const ok = await validateBlob(f);
-    if(!ok){ alert('Too blurry — please retake.'); return; }
-    addThumb(f); nextBtn.disabled = false;
-  };
+  fileInput.onchange = async (e)=>{ const f=e.target.files && e.target.files[0]; if(!f) return; const ok = await validateBlob(f, true); if(!ok){ alert('Not acceptable — please retake with better framing/quality.'); return; } addThumb(f); nextBtn.disabled=false; };
 
   function startLoop(){ if(timer) clearInterval(timer); timer = setInterval(tick, +tickMs.value || 150); }
+  function resizeOverlay(){ overlay.width = video.clientWidth; overlay.height = video.clientHeight; }
 
   async function tick(){
     if(!video.videoWidth) return;
-    const maxSide = +dsInput.value || 256;
-    const w = video.videoWidth, h = video.videoHeight;
-    const scale = Math.max(w,h)/maxSide;
-    const nw = Math.max(1, Math.round(w/scale));
-    const nh = Math.max(1, Math.round(h/scale));
+    const { gray, w, h } = grabAnalysisFrame(+dsInput.value || 256);
 
-    work.width = nw; work.height = nh;
-    const g = work.getContext('2d', { willReadFrequently:true });
-    g.drawImage(video, 0, 0, nw, nh);
-    const img = g.getImageData(0,0,nw,nh);
-
-    const gray = toGray(img.data);
-    const vol = varianceOfLaplacian(gray, nw, nh);
-    const ten = tenengrad(gray, nw, nh);
-
-    const zVol = zscore(volStats, vol);
-    const zTen = zscore(tenStats, ten);
+    const vol = varianceOfLaplacian(gray, w, h);
+    const ten = tenengrad(gray, w, h);
+    const zVol = zscore(volStats, vol); const zTen = zscore(tenStats, ten);
     const score = 0.6 * zVol + 0.4 * zTen;
 
+    const {mean, pctLow, pctHigh} = luminanceStats(gray);
+    const under = mean<70 || pctLow>0.20; const over = mean>180 || pctHigh>0.05;
+    const glareArea = saturatedArea(gray) / (w*h);
+    const illumRatio = illuminationRatio(gray, w, h, 31);
+
+    const doc = detectDocument(gray, w, h);
+    const coverage = doc ? (polygonArea(doc.corners) / (w*h)) : 0;
+    const anglesOK = doc ? anglesNearRight(doc.corners, (+skewTh.value)||12) : false;
+    const sidesOK = doc ? oppositeSideRatioOK(doc.corners, 1.4) : false;
+
+    // Draw overlay (target box + detected quad)
+    drawOverlay(doc ? doc.corners : null, coverage, under, over, glareArea, illumRatio, score);
+
     const cold = volStats.n < 20 || tenStats.n < 20;
-    const pass = cold ? (vol > (+volTh.value||120) && ten > (+tenTh.value||8)) : (score > 0);
+    const blurPass = cold ? (vol > (+volTh.value||120) && ten > (+tenTh.value||8)) : (score > 0);
+    const covPass = coverage >= ((+covTh.value)||0.8);
+    const expPass = !under && !over;
+    const glarePass = glareArea <= ((+glareTh.value)||0.03);
+    const skewPass = anglesOK && sidesOK;
 
     scoreTxt.textContent = score.toFixed(2);
+    covTxt.textContent = (coverage*100).toFixed(0) + '%';
     meterFill.style.width = Math.max(0, Math.min(100, 50 + score*12)) + '%';
 
-    if(pass){
-      status('sharp', '#16a34a');
+    if(blurPass && covPass && expPass && glarePass && skewPass){
+      status('ready — good focus & framing', '#16a34a');
       if(accepting){
         const msStable = +stableMs.value || 400;
         if(lastSharpTs === 0) lastSharpTs = performance.now();
         else if(performance.now() - lastSharpTs >= msStable){
-          accepting = false;
-          await autoCapture();
-          setTimeout(()=>{ accepting = true; lastSharpTs = 0; }, 600);
+          // Auto-capture optional: comment next two lines to force manual only
+          // accepting=false; await captureAndValidate(true); setTimeout(()=>{ accepting=true; lastSharpTs=0; }, 600);
         }
       }
     } else {
-      status('blurry — hold still / tap to focus', '#ef4444');
       lastSharpTs = 0;
+      let reason = !blurPass ? 'blur' : !covPass ? 'frame (need ≥80%)' : !expPass ? (under? 'too dark': 'too bright') : !glarePass ? 'glare' : !skewPass ? 'skew' : '';
+      status(`not ready — ${reason}`, '#ef4444');
     }
   }
 
-  async function autoCapture(){
-    modeTxt.textContent = 'auto‑snap';
-    const blob = await grabFrameBlob();
-    if(!blob) return;
-    addThumb(blob);
-    nextBtn.disabled = false;
-  }
-
-  async function manualCapture(){
-    modeTxt.textContent = 'manual';
-    const blob = await grabFrameBlob();
-    if(!blob) return;
-    const ok = await validateBlob(blob);
-    if(!ok){ alert('Too blurry — please retake.'); return; }
+  async function captureAndValidate(fromAuto=false){
+    const blob = await grabFrameBlob(); if(!blob) return;
+    const ok = await validateBlob(blob, false);
+    if(!ok){ alert('Retake: make sure page fills ≥80%, is sharp, evenly lit, with minimal glare.'); return; }
     addThumb(blob); nextBtn.disabled = false;
   }
 
+  function grabAnalysisFrame(maxSide){
+    const vw = video.videoWidth, vh = video.videoHeight; const scale = Math.max(vw,vh)/maxSide; const nw = Math.max(1, Math.round(vw/scale)); const nh = Math.max(1, Math.round(vh/scale));
+    work.width = nw; work.height = nh; const g = work.getContext('2d', {willReadFrequently:true}); g.drawImage(video, 0, 0, nw, nh); const img = g.getImageData(0,0,nw,nh); const gray = toGray(img.data); return {gray, w:nw, h:nh};
+  }
+
   async function grabFrameBlob(){
-    if(!stream){ return null; }
-    const track = stream.getVideoTracks()[0];
-    let blob=null;
-    if('ImageCapture' in window){
-      try {
-        const capture = new ImageCapture(track);
-        const bmp = await capture.grabFrame();
-        full.width = bmp.width; full.height = bmp.height;
-        full.getContext('2d').drawImage(bmp,0,0);
-        blob = await new Promise(res => full.toBlob(res, 'image/jpeg', 0.92));
-      } catch(e){ blob = null; }
-    }
-    if(!blob){
-      full.width = video.videoWidth; full.height = video.videoHeight;
-      full.getContext('2d').drawImage(video,0,0);
-      blob = await new Promise(res => full.toBlob(res, 'image/jpeg', 0.92));
-    }
+    if(!stream) return null; const track = stream.getVideoTracks()[0]; let blob=null;
+    if('ImageCapture' in window){ try { const capture = new ImageCapture(track); const bmp = await capture.grabFrame(); full.width = bmp.width; full.height = bmp.height; full.getContext('2d').drawImage(bmp,0,0); blob = await new Promise(res => full.toBlob(res, 'image/jpeg', 0.92)); } catch(e){ blob=null; } }
+    if(!blob){ full.width = video.videoWidth; full.height = video.videoHeight; full.getContext('2d').drawImage(video,0,0); blob = await new Promise(res => full.toBlob(res, 'image/jpeg', 0.92)); }
     return blob;
   }
 
-  async function validateBlob(blob){
+  async function validateBlob(blob, fromUpload){
     const bmp = await createImageBitmap(blob);
-    const maxSide = 512;
-    const scale = Math.max(bmp.width, bmp.height)/maxSide;
-    const nw = Math.max(1, Math.round(bmp.width/scale));
-    const nh = Math.max(1, Math.round(bmp.height/scale));
-    work.width = nw; work.height = nh;
-    const g = work.getContext('2d', { willReadFrequently:true });
-    g.drawImage(bmp, 0,0,nw,nh);
-    const img = g.getImageData(0,0,nw,nh);
-    const gray = toGray(img.data);
-    const vol = varianceOfLaplacian(gray, nw, nh);
-    const ten = tenengrad(gray, nw, nh);
-    const cold = volStats.n < 20 || tenStats.n < 20;
-    const pass = cold ? (vol > (+volTh.value||120) && ten > (+tenTh.value||8)) : (0.6*zscore(volStats,vol)+0.4*zscore(tenStats,ten) > 0);
-    return pass;
+    // Resolution sanity for readability: short side ≥ 1000 px
+    const shortSideOK = Math.min(bmp.width, bmp.height) >= 1000;
+    const maxSide = 512; const scale = Math.max(bmp.width, bmp.height)/maxSide; const nw = Math.max(1, Math.round(bmp.width/scale)); const nh = Math.max(1, Math.round(bmp.height/scale));
+    work.width = nw; work.height = nh; const g = work.getContext('2d', { willReadFrequently:true }); g.drawImage(bmp, 0,0,nw,nh);
+    const img = g.getImageData(0,0,nw,nh); const gray = toGray(img.data);
+
+    const vol = varianceOfLaplacian(gray, nw, nh); const ten = tenengrad(gray, nw, nh); const cold=false;
+    const blurPass = (vol > (+volTh.value||120) && ten > (+tenTh.value||8));
+    const {mean, pctLow, pctHigh} = luminanceStats(gray); const under = mean<70 || pctLow>0.20; const over = mean>180 || pctHigh>0.05; const expPass = !under && !over;
+    const glareArea = saturatedArea(gray)/(nw*nh); const glarePass = glareArea <= ((+glareTh.value)||0.03);
+    const illumRatio = illuminationRatio(gray, nw, nh, 31); const illumPass = illumRatio <= 2.5;
+    const doc = detectDocument(gray, nw, nh);
+    const coverage = doc ? polygonArea(doc.corners)/(nw*nh) : 0; const covPass = coverage >= ((+covTh.value)||0.8);
+    const skewPass = doc ? (anglesNearRight(doc.corners, (+skewTh.value)||12) && oppositeSideRatioOK(doc.corners, 1.4)) : false;
+
+    // Overall decision
+    return blurPass && expPass && glarePass && illumPass && covPass && skewPass && shortSideOK;
   }
 
-  function addThumb(blob){
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'capture.jpg'; a.title = 'Tap to download';
-    const img = document.createElement('img'); img.src = url; img.style.width='100%'; img.style.borderRadius='10px'; img.loading='lazy';
-    a.appendChild(img); thumbs.prepend(a);
-  }
-
+  function addThumb(blob){ const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=url; a.download='capture.jpg'; a.title='Download'; const img=document.createElement('img'); img.src=url; img.style.width='100%'; img.style.borderRadius='10px'; img.loading='lazy'; a.appendChild(img); thumbs.prepend(a); }
   function status(text, color){ statusTxt.textContent = text; statusPill.style.background = color; }
 
-  // === Sharpness metrics ===
-  function toGray(rgba){ const n = rgba.length/4; const out = new Uint8Array(n); for(let i=0,j=0;i<n;i++,j+=4){ out[i] = (0.2126*rgba[j] + 0.7152*rgba[j+1] + 0.0722*rgba[j+2])|0; } return out; }
+  // === Core metrics ===
+  function toGray(rgba){ const n=rgba.length/4; const out=new Uint8Array(n); for(let i=0,j=0;i<n;i++,j+=4){ out[i]=(0.2126*rgba[j] + 0.7152*rgba[j+1] + 0.0722*rgba[j+2])|0; } return out; }
+  function varianceOfLaplacian(gray,w,h){ const k=[0,1,0,1,-4,1,0,1,0]; let sum=0,sum2=0,n=0; for(let y=1;y<h-1;y++){ for(let x=1;x<w-1;x++){ let acc=0,ki=0; for(let dy=-1;dy<=1;dy++){ const row=(y+dy)*w; for(let dx=-1;dx<=1;dx++) acc += gray[row+(x+dx)]*k[ki++]; } sum+=acc; sum2+=acc*acc; n++; } } const m=sum/n; return (sum2/n)-m*m; }
+  function tenengrad(gray,w,h){ const sx=[-1,0,1,-2,0,2,-1,0,1], sy=[-1,-2,-1,0,0,0,1,2,1]; let sum=0,n=0; for(let y=1;y<h-1;y++){ for(let x=1;x<w-1;x++){ let gx=0,gy=0,ki=0; for(let dy=-1;dy<=1;dy++){ const row=(y+dy)*w; for(let dx=-1;dx<=1;dx++){ const p=gray[row+(x+dx)]; gx+=p*sx[ki]; gy+=p*sy[ki]; ki++; } } const g2=gx*gx+gy*gy; sum+=g2; n++; } } return sum/n; }
+  function luminanceStats(gray){ let sum=0,n=gray.length,lo=0,hi=0; for(let i=0;i<n;i++){ const v=gray[i]; sum+=v; if(v<10) lo++; if(v>245) hi++; } return {mean:sum/n, pctLow:lo/n, pctHigh:hi/n}; }
+  function saturatedArea(gray){ let c=0; for(let i=0;i<gray.length;i++) if(gray[i]>250) c++; return c; }
+  function illuminationRatio(gray,w,h,ksize){ // naive box blur stride
+    const k=Math.max(3,ksize|0), r=(k-1)/2|0; const out=new Float32Array(w*h);
+    // horizontal
+    for(let y=0;y<h;y++){
+      let acc=0; for(let x=0;x<w;x++){ const add=gray[y*w+Math.min(w-1,x+r)], rem=gray[y*w+Math.max(0,x-r-1)]; acc+=add-rem; out[y*w+x]=acc; }
+    }
+    // vertical + normalize to k*k
+    let minv=1e9, maxv=-1e9; const out2=new Float32Array(w*h);
+    for(let x=0;x<w;x++){
+      let acc=0; for(let y=0;y<h;y++){ const add=out[Math.min(h-1,y+r)*w+x], rem=out[Math.max(0,y-r-1)*w+x]; acc+=add-rem; const v=acc/(k*k); out2[y*w+x]=v; if(v<minv) minv=v; if(v>maxv) maxv=v; }
+    }
+    return (maxv+1e-6)/(minv+1e-6);
+  }
 
-  function varianceOfLaplacian(gray, w, h){ const k = [0,1,0, 1,-4,1, 0,1,0]; let sum=0, sum2=0, n=0; for(let y=1;y<h-1;y++){ for(let x=1;x<w-1;x++){ let acc=0, ki=0; for(let dy=-1; dy<=1; dy++){ const row=(y+dy)*w; for(let dx=-1; dx<=1; dx++) acc += gray[row + (x+dx)] * k[ki++]; } sum += acc; sum2 += acc*acc; n++; } } const mean = sum/n; return (sum2/n) - mean*mean; }
+  // === Document detection (edge map → extreme corners) ===
+  function detectDocument(gray,w,h){
+    // Sobel magnitude & threshold
+    const sx=[-1,0,1,-2,0,2,-1,0,1], sy=[-1,-2,-1,0,0,0,1,2,1];
+    const mag=new Float32Array(w*h); let maxg=0;
+    for(let y=1;y<h-1;y++){
+      for(let x=1;x<w-1;x++){
+        let gx=0,gy=0,ki=0; for(let dy=-1;dy<=1;dy++){ const row=(y+dy)*w; for(let dx=-1;dx<=1;dx++){ const p=gray[row+(x+dx)]; gx+=p*sx[ki]; gy+=p*sy[ki]; ki++; } }
+        const g=Math.hypot(gx,gy); mag[y*w+x]=g; if(g>maxg) maxg=g;
+      }
+    }
+    const th = maxg*0.25; // keep strongest edges
+    const pts=[]; for(let y=1;y<h-1;y++){ for(let x=1;x<w-1;x++){ if(mag[y*w+x]>=th) pts.push([x,y]); } }
+    if(pts.length<50) return null;
+    // Extreme points heuristic
+    let minSum=[0,0,1e9], maxSum=[0,0,-1e9], minDiff=[0,0,1e9], maxDiff=[0,0,-1e9];
+    for(const [x,y] of pts){ const s=x+y, d=x-y; if(s<minSum[2]) minSum=[x,y,s]; if(s>maxSum[2]) maxSum=[x,y,s]; if(d<minDiff[2]) minDiff=[x,y,d]; if(d>maxDiff[2]) maxDiff=[x,y,d]; }
+    const corners=[ [minSum[0],minSum[1]], [maxDiff[0],maxDiff[1]], [maxSum[0],maxSum[1]], [minDiff[0],minDiff[1]] ]; // TL, TR, BR, BL approx
+    // sanity: ensure clockwise order and inside image
+    if(!corners.every(([x,y])=>x>=0&&y>=0&&x<w&&y<h)) return null;
+    return { corners };
+  }
+  function polygonArea(c){ let a=0; for(let i=0;i<c.length;i++){ const [x1,y1]=c[i], [x2,y2]=c[(i+1)%c.length]; a += x1*y2 - x2*y1; } return Math.abs(a)/2; }
+  function anglesNearRight(c, tolDeg){
+    function angle(a,b,c){ const v1=[a[0]-b[0], a[1]-b[1]], v2=[c[0]-b[0], c[1]-b[1]]; const dot=v1[0]*v2[0]+v1[1]*v2[1]; const m1=Math.hypot(v1[0],v1[1]), m2=Math.hypot(v2[0],v2[1]); const cos=Math.max(-1, Math.min(1, dot/(m1*m2+1e-6))); return Math.acos(cos)*180/Math.PI; }
+    for(let i=0;i<4;i++){ const a=c[(i+3)%4], b=c[i], d=c[(i+1)%4]; const ang=angle(a,b,d); if(Math.abs(90-ang)>tolDeg) return false; } return true;
+  }
+  function oppositeSideRatioOK(c, maxRatio){ function len(p,q){ return Math.hypot(p[0]-q[0], p[1]-q[1]); } const ab=len(c[0],c[1]), bc=len(c[1],c[2]), cd=len(c[2],c[3]), da=len(c[3],c[0]); const r1=Math.max(ab,cd)/Math.max(1,Math.min(ab,cd)); const r2=Math.max(bc,da)/Math.max(1,Math.min(bc,da)); return r1<=maxRatio && r2<=maxRatio; }
 
-  function tenengrad(gray, w, h){ const sx=[-1,0,1,-2,0,2,-1,0,1]; const sy=[-1,-2,-1,0,0,0,1,2,1]; let sum=0, n=0; for(let y=1;y<h-1;y++){ for(let x=1;x<w-1;x++){ let gx=0, gy=0, ki=0; for(let dy=-1; dy<=1; dy++){ const row=(y+dy)*w; for(let dx=-1; dx<=1; dx++){ const p = gray[row + (x+dx)]; gx += p * sx[ki]; gy += p * sy[ki]; ki++; } } const g2 = gx*gx + gy*gy; sum += g2; n++; } } return sum/n; }
-
-  // Rolling z-score stats per metric (Welford)
-  const volStats = { n:0, mean:0, m2:0 };
-  const tenStats = { n:0, mean:0, m2:0 };
-  function zscore(stats, x){ stats.n++; const d = x - stats.mean; stats.mean += d / stats.n; const d2 = x - stats.mean; stats.m2 += d * d2; const v = (stats.n>1) ? (stats.m2 / (stats.n-1)) : 1e-6; const sd = Math.sqrt(Math.max(v, 1e-6)); return (x - stats.mean) / sd; }
+  // === Overlay drawing ===
+  function drawOverlay(corners, coverage, under, over, glareArea, illumRatio, score){
+    const g = overlay.getContext('2d'); const W=overlay.width, H=overlay.height; g.clearRect(0,0,W,H);
+    // target box ~85% of view
+    const target=0.85; const tw=W*target, th=H*target; const tx=(W-tw)/2, ty=(H-th)/2; g.strokeStyle='#ffffff66'; g.lineWidth=2; g.setLineDash([8,6]); g.strokeRect(tx,ty,tw,th); g.setLineDash([]);
+    if(corners){
+      // scale corners from analysis space to overlay space by using current video draw size
+      // Assumption: video fills overlay; mapping via ratios
+      const { w, h } = work; // last analysis size
+      const sx=W/w, sy=H/h; const cc=corners.map(([x,y])=>[x*sx,y*sy]);
+      g.lineWidth=3; g.strokeStyle= (coverage>=((+covTh.value)||0.8) ? '#16a34a' : '#ef4444'); g.beginPath(); g.moveTo(cc[0][0],cc[0][1]); for(let i=1;i<cc.length;i++) g.lineTo(cc[i][0],cc[i][1]); g.closePath(); g.stroke();
+      // corners
+      g.fillStyle=g.strokeStyle; for(const [x,y] of cc){ g.beginPath(); g.arc(x,y,4,0,Math.PI*2); g.fill(); }
+    }
+    // small HUD with quick flags
+    const hud=`exp:${under?'low':over?'high':'ok'}  glare:${(glareArea*100).toFixed(0)}%  illum:${illumRatio.toFixed(2)}  sharp:${score.toFixed(2)}`;
+    g.fillStyle='#00000080'; g.fillRect(8,H-28, g.measureText? (g.measureText(hud).width+16):240, 22);
+    g.fillStyle='#fff'; g.font='12px ui-monospace,monospace'; g.fillText(hud, 16, H-12);
+  }
 })();
 </script>
 </body>
@@ -310,7 +343,7 @@ Use HTTPS (or localhost) and allow camera permissions. If in an in‑app browser
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Blur‑Guard MVP (PWA)</title>
+  <title>Blur‑Guard MVP (Doc Scanner PWA)</title>
   <meta name="theme-color" content="#0b1020" />
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -334,38 +367,42 @@ Use HTTPS (or localhost) and allow camera permissions. If in an in‑app browser
     .next { background:#10b981 }
     .banner { background:#111827; border:1px solid #1f2937; padding:10px 12px; border-radius:10px; margin:10px 0; }
     .install { background:#0ea5e9 }
+    .overlayWrap { position:relative; margin-top:12px }
+    #overlay { position:absolute; inset:0; pointer-events:none; border-radius:12px }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>Blur‑Guard MVP (Web + PWA)</h1>
-    <p class="hint">Mobile‑web app that only <b>accepts sharp photos</b>. Works offline once installed. On‑device analysis; no backend.</p>
+    <h1>Blur‑Guard MVP (Document Scanner)</h1>
+    <p class="hint">Only accepts photos that pass core checks: <b>sharpness</b>, <b>exposure</b>, <b>glare</b>, <b>coverage ≥ 80%</b>, and <b>reasonable skew</b>. Works offline once installed.</p>
 
     <div id="iosBanner" class="banner" style="display:none">
-      <b>Tip (iPhone):</b> Share → <b>Add to Home Screen</b>, then open from the icon for best camera behavior.
+      <b>Tip (iPhone):</b> Share → <b>Add to Home Screen</b> for best camera behavior.
     </div>
 
     <div class="grid">
       <section class="card">
         <div class="row">
           <button id="startBtn" class="btn">Start camera</button>
-          <button id="snapBtn" class="btn" disabled>Manual capture</button>
+          <button id="snapBtn" class="btn" disabled>Capture</button>
           <button id="nextBtn" class="btn next" disabled>Next step →</button>
           <button id="installBtn" class="btn install" style="display:none">Install app</button>
           <input id="fileInput" type="file" accept="image/*;capture=camera" style="display:none" />
-          <button id="fallbackBtn" class="btn" style="background:#6b7280">Upload photo (fallback)</button>
+          <button id="fallbackBtn" class="btn" style="background:#6b7280">Upload (fallback)</button>
         </div>
         <div class="row" style="margin-top:10px">
           <span id="statusPill" class="pill" style="background:#1f2937">status: <span id="statusTxt">idle</span></span>
-          <span class="pill" style="background:#111827">sharpness: <span id="scoreTxt" class="mono">—</span></span>
-          <span class="pill" style="background:#111827">mode: <span id="modeTxt" class="mono">auto‑snap</span></span>
+          <span class="pill" style="background:#111827">score: <span id="scoreTxt" class="mono">—</span></span>
+          <span class="pill" style="background:#111827">coverage: <span id="covTxt" class="mono">—</span></span>
+          <span class="pill" style="background:#111827">mode: <span id="modeTxt" class="mono">manual</span></span>
         </div>
 
         <div style="margin-top:12px" class="meter"><div id="meterFill"></div></div>
-        <div class="footer">Green bar = sharper. Auto‑snap after ~0.4s of stable green.</div>
+        <div class="footer">Green = sharper. Overlay box shows target (~85%); detected page will outline in green.</div>
 
-        <div style="position:relative; margin-top:12px">
+        <div class="overlayWrap">
           <video id="video" autoplay playsinline muted style="width:100%; border-radius:12px; background:black"></video>
+          <canvas id="overlay"></canvas>
           <canvas id="work" width="0" height="0" style="display:none"></canvas>
           <canvas id="full" width="0" height="0" style="display:none"></canvas>
         </div>
@@ -374,56 +411,47 @@ Use HTTPS (or localhost) and allow camera permissions. If in an in‑app browser
       <aside class="card">
         <h3>Accepted photos</h3>
         <div id="thumbs" class="thumbs"></div>
-        <div style="margin-top:10px" class="hint">Only sharp photos appear here. Tap a thumbnail to download.</div>
+        <div class="hint">Tap a thumbnail to download.</div>
       </aside>
     </div>
 
     <details class="card" style="margin-top:16px">
-      <summary><b>Settings (tune if needed)</b></summary>
+      <summary><b>Settings</b></summary>
       <div class="row" style="margin-top:10px">
-        <label>Downsample max side: <input id="dsInput" type="number" value="256" class="mono" style="width:90px"></label>
-        <label>Stable ms: <input id="stableMs" type="number" value="400" class="mono" style="width:90px"></label>
+        <label>Analysis max side: <input id="dsInput" type="number" value="256" class="mono" style="width:90px"></label>
+        <label>Stable ms (auto): <input id="stableMs" type="number" value="400" class="mono" style="width:90px"></label>
         <label>Frame interval ms: <input id="tickMs" type="number" value="150" class="mono" style="width:110px"></label>
       </div>
       <div class="row" style="margin-top:10px">
-        <label>Cold‑start thresholds (512px equiv):</label>
+        <label>Blur thresholds (512px equiv):</label>
         <span class="pill" style="background:#111827">VoL &gt; <input id="volTh" type="number" value="120" class="mono" style="width:70px"></span>
         <span class="pill" style="background:#111827">Tenengrad &gt; <input id="tenTh" type="number" value="8" class="mono" style="width:70px"></span>
       </div>
+      <div class="row" style="margin-top:10px">
+        <span class="pill" style="background:#111827">Min coverage: <input id="covTh" type="number" value="0.80" step="0.05" class="mono" style="width:80px"></span>
+        <span class="pill" style="background:#111827">Max skew (°): <input id="skewTh" type="number" value="12" class="mono" style="width:80px"></span>
+        <span class="pill" style="background:#111827">Glare max area: <input id="glareTh" type="number" value="0.03" step="0.01" class="mono" style="width:80px"></span>
+      </div>
     </details>
 
-    <p class="footer">Serve via <b>HTTPS</b> (or <code>http://localhost</code>) or camera will be blocked.</p>
+    <p class="footer">Use <b>HTTPS</b> (or <code>http://localhost</code>) for camera access.</p>
   </div>
 
 <script>
-// --- PWA bits: manifest + service worker in one file ---
+// PWA: manifest + service worker inline
 (function(){
   const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
   const isStandalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
   if(isIOS && !isStandalone){ document.getElementById('iosBanner').style.display='block'; }
-
-  // Minimal generated icon + manifest
-  function makeIcon(size){
-    const c=document.createElement('canvas'); c.width=c.height=size; const g=c.getContext('2d');
-    g.fillStyle='#0f172a'; g.fillRect(0,0,size,size);
-    g.fillStyle='#3b82f6'; g.font=`${Math.round(size*0.5)}px 700 system-ui`; g.textAlign='center'; g.textBaseline='middle';
-    g.fillText('BG', size/2, size/2+size*0.06);
-    return c.toDataURL('image/png');
-  }
-  const manifest = { name:'Blur‑Guard', short_name:'BlurGuard', start_url:'.', display:'standalone', background_color:'#0b1020', theme_color:'#0b1020',
-    icons:[{src:makeIcon(192),sizes:'192x192',type:'image/png'},{src:makeIcon(512),sizes:'512x512',type:'image/png'}] };
+  function makeIcon(size){ const c=document.createElement('canvas'); c.width=c.height=size; const g=c.getContext('2d'); g.fillStyle='#0f172a'; g.fillRect(0,0,size,size); g.fillStyle='#3b82f6'; g.font=`${Math.round(size*0.5)}px 700 system-ui`; g.textAlign='center'; g.textBaseline='middle'; g.fillText('BG', size/2, size/2+size*0.06); return c.toDataURL('image/png'); }
+  const manifest = { name:'Blur‑Guard', short_name:'BlurGuard', start_url:'.', display:'standalone', background_color:'#0b1020', theme_color:'#0b1020', icons:[{src:makeIcon(192),sizes:'192x192',type:'image/png'},{src:makeIcon(512),sizes:'512x512',type:'image/png'}] };
   const manUrl = URL.createObjectURL(new Blob([JSON.stringify(manifest)], {type:'application/json'}));
   const mlink = document.createElement('link'); mlink.rel='manifest'; mlink.href=manUrl; document.head.appendChild(mlink);
-
   if('serviceWorker' in navigator){
-    const swCode = `self.addEventListener('install',e=>{e.waitUntil(caches.open('blur-guard-v1').then(c=>c.addAll(['./'])));self.skipWaiting();});
-self.addEventListener('activate',e=>self.clients.claim());
-self.addEventListener('fetch',e=>{e.respondWith(fetch(e.request).catch(()=>caches.match(e.request).then(r=>r||caches.match('./'))))});`;
+    const swCode = `self.addEventListener('install',e=>{e.waitUntil(caches.open('blur-guard-v2').then(c=>c.addAll(['./'])));self.skipWaiting();});self.addEventListener('activate',e=>self.clients.claim());self.addEventListener('fetch',e=>{e.respondWith(fetch(e.request).catch(()=>caches.match(e.request).then(r=>r||caches.match('./'))))});`;
     const swUrl = URL.createObjectURL(new Blob([swCode], {type:'text/javascript'}));
     navigator.serviceWorker.register(swUrl).catch(()=>{});
   }
-
-  // Install prompt on Android/Chrome
   let deferredPrompt=null; const installBtn=document.getElementById('installBtn');
   window.addEventListener('beforeinstallprompt', (e)=>{ e.preventDefault(); deferredPrompt=e; installBtn.style.display='inline-block'; });
   installBtn.onclick = async ()=>{ if(!deferredPrompt) return; deferredPrompt.prompt(); await deferredPrompt.userChoice; installBtn.style.display='none'; };
@@ -431,9 +459,10 @@ self.addEventListener('fetch',e=>{e.respondWith(fetch(e.request).catch(()=>cache
 </script>
 
 <script>
-// --- Main app logic ---
+// Main app logic with core checks + document detection overlay
 (function(){
   const video = document.getElementById('video');
+  const overlay = document.getElementById('overlay');
   const work = document.getElementById('work');
   const full = document.getElementById('full');
   const startBtn = document.getElementById('startBtn');
@@ -442,172 +471,209 @@ self.addEventListener('fetch',e=>{e.respondWith(fetch(e.request).catch(()=>cache
   const statusTxt = document.getElementById('statusTxt');
   const statusPill = document.getElementById('statusPill');
   const scoreTxt = document.getElementById('scoreTxt');
+  const covTxt = document.getElementById('covTxt');
   const meterFill = document.getElementById('meterFill');
-  const modeTxt = document.getElementById('modeTxt');
-  const thumbs = document.getElementById('thumbs');
   const dsInput = document.getElementById('dsInput');
   const stableMs = document.getElementById('stableMs');
   const tickMs = document.getElementById('tickMs');
   const volTh = document.getElementById('volTh');
   const tenTh = document.getElementById('tenTh');
+  const covTh = document.getElementById('covTh');
+  const skewTh = document.getElementById('skewTh');
+  const glareTh = document.getElementById('glareTh');
   const fileInput = document.getElementById('fileInput');
   const fallbackBtn = document.getElementById('fallbackBtn');
+
+  // rolling stats for sharpness
+  const volStats = { n:0, mean:0, m2:0 };
+  const tenStats = { n:0, mean:0, m2:0 };
+  function zscore(stats, x){ stats.n++; const d = x - stats.mean; stats.mean += d / stats.n; const d2 = x - stats.mean; stats.m2 += d * d2; const v = (stats.n>1) ? (stats.m2 / (stats.n-1)) : 1e-6; const sd = Math.sqrt(Math.max(v, 1e-6)); return (x - stats.mean) / sd; }
 
   let stream=null, timer=null, lastSharpTs=0, accepting=true;
 
   startBtn.onclick = async () => {
     try {
       startBtn.disabled = true;
-      // Works only on HTTPS or http://localhost
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } },
-        audio: false
-      });
-      video.srcObject = stream;
-      await video.play();
-      snapBtn.disabled = false;
-      status('analyzing…', '#f59e0b');
-      startLoop();
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio:false });
+      video.srcObject = stream; await video.play();
+      resizeOverlay(); window.addEventListener('resize', resizeOverlay);
+      snapBtn.disabled = false; status('analyzing…', '#f59e0b'); startLoop();
     } catch (e) {
       alert(`Camera error: ${e.message}
-Use HTTPS (or localhost) and allow camera permissions. If in an in‑app browser, open in Chrome/Safari.`);
-      console.error('getUserMedia failed:', e);
+Use HTTPS (or localhost). If in an in‑app browser, open in Chrome/Safari and allow camera.`);
       startBtn.disabled = false;
     }
   };
 
-  snapBtn.onclick = () => manualCapture();
-  nextBtn.onclick = () => alert('Proceeding to the next step… (hook your flow here)');
+  snapBtn.onclick = () => captureAndValidate();
+  nextBtn.onclick = () => alert('Proceed to next step… (hook your flow)');
   fallbackBtn.onclick = () => fileInput.click();
-  fileInput.onchange = async (e)=>{
-    const f = e.target.files && e.target.files[0]; if(!f) return;
-    const ok = await validateBlob(f);
-    if(!ok){ alert('Too blurry — please retake.'); return; }
-    addThumb(f); nextBtn.disabled = false;
-  };
+  fileInput.onchange = async (e)=>{ const f=e.target.files && e.target.files[0]; if(!f) return; const ok = await validateBlob(f, true); if(!ok){ alert('Not acceptable — please retake with better framing/quality.'); return; } addThumb(f); nextBtn.disabled=false; };
 
   function startLoop(){ if(timer) clearInterval(timer); timer = setInterval(tick, +tickMs.value || 150); }
+  function resizeOverlay(){ overlay.width = video.clientWidth; overlay.height = video.clientHeight; }
 
   async function tick(){
     if(!video.videoWidth) return;
-    const maxSide = +dsInput.value || 256;
-    const w = video.videoWidth, h = video.videoHeight;
-    const scale = Math.max(w,h)/maxSide;
-    const nw = Math.max(1, Math.round(w/scale));
-    const nh = Math.max(1, Math.round(h/scale));
+    const { gray, w, h } = grabAnalysisFrame(+dsInput.value || 256);
 
-    work.width = nw; work.height = nh;
-    const g = work.getContext('2d', { willReadFrequently:true });
-    g.drawImage(video, 0, 0, nw, nh);
-    const img = g.getImageData(0,0,nw,nh);
-
-    const gray = toGray(img.data);
-    const vol = varianceOfLaplacian(gray, nw, nh);
-    const ten = tenengrad(gray, nw, nh);
-
-    const zVol = zscore(volStats, vol);
-    const zTen = zscore(tenStats, ten);
+    const vol = varianceOfLaplacian(gray, w, h);
+    const ten = tenengrad(gray, w, h);
+    const zVol = zscore(volStats, vol); const zTen = zscore(tenStats, ten);
     const score = 0.6 * zVol + 0.4 * zTen;
 
+    const {mean, pctLow, pctHigh} = luminanceStats(gray);
+    const under = mean<70 || pctLow>0.20; const over = mean>180 || pctHigh>0.05;
+    const glareArea = saturatedArea(gray) / (w*h);
+    const illumRatio = illuminationRatio(gray, w, h, 31);
+
+    const doc = detectDocument(gray, w, h);
+    const coverage = doc ? (polygonArea(doc.corners) / (w*h)) : 0;
+    const anglesOK = doc ? anglesNearRight(doc.corners, (+skewTh.value)||12) : false;
+    const sidesOK = doc ? oppositeSideRatioOK(doc.corners, 1.4) : false;
+
+    // Draw overlay (target box + detected quad)
+    drawOverlay(doc ? doc.corners : null, coverage, under, over, glareArea, illumRatio, score);
+
     const cold = volStats.n < 20 || tenStats.n < 20;
-    const pass = cold ? (vol > (+volTh.value||120) && ten > (+tenTh.value||8)) : (score > 0);
+    const blurPass = cold ? (vol > (+volTh.value||120) && ten > (+tenTh.value||8)) : (score > 0);
+    const covPass = coverage >= ((+covTh.value)||0.8);
+    const expPass = !under && !over;
+    const glarePass = glareArea <= ((+glareTh.value)||0.03);
+    const skewPass = anglesOK && sidesOK;
 
     scoreTxt.textContent = score.toFixed(2);
+    covTxt.textContent = (coverage*100).toFixed(0) + '%';
     meterFill.style.width = Math.max(0, Math.min(100, 50 + score*12)) + '%';
 
-    if(pass){
-      status('sharp', '#16a34a');
+    if(blurPass && covPass && expPass && glarePass && skewPass){
+      status('ready — good focus & framing', '#16a34a');
       if(accepting){
         const msStable = +stableMs.value || 400;
         if(lastSharpTs === 0) lastSharpTs = performance.now();
         else if(performance.now() - lastSharpTs >= msStable){
-          accepting = false;
-          await autoCapture();
-          setTimeout(()=>{ accepting = true; lastSharpTs = 0; }, 600);
+          // Auto-capture optional: comment next two lines to force manual only
+          // accepting=false; await captureAndValidate(true); setTimeout(()=>{ accepting=true; lastSharpTs=0; }, 600);
         }
       }
     } else {
-      status('blurry — hold still / tap to focus', '#ef4444');
       lastSharpTs = 0;
+      let reason = !blurPass ? 'blur' : !covPass ? 'frame (need ≥80%)' : !expPass ? (under? 'too dark': 'too bright') : !glarePass ? 'glare' : !skewPass ? 'skew' : '';
+      status(`not ready — ${reason}`, '#ef4444');
     }
   }
 
-  async function autoCapture(){
-    modeTxt.textContent = 'auto‑snap';
-    const blob = await grabFrameBlob();
-    if(!blob) return;
-    addThumb(blob);
-    nextBtn.disabled = false;
-  }
-
-  async function manualCapture(){
-    modeTxt.textContent = 'manual';
-    const blob = await grabFrameBlob();
-    if(!blob) return;
-    const ok = await validateBlob(blob);
-    if(!ok){ alert('Too blurry — please retake.'); return; }
+  async function captureAndValidate(fromAuto=false){
+    const blob = await grabFrameBlob(); if(!blob) return;
+    const ok = await validateBlob(blob, false);
+    if(!ok){ alert('Retake: make sure page fills ≥80%, is sharp, evenly lit, with minimal glare.'); return; }
     addThumb(blob); nextBtn.disabled = false;
   }
 
+  function grabAnalysisFrame(maxSide){
+    const vw = video.videoWidth, vh = video.videoHeight; const scale = Math.max(vw,vh)/maxSide; const nw = Math.max(1, Math.round(vw/scale)); const nh = Math.max(1, Math.round(vh/scale));
+    work.width = nw; work.height = nh; const g = work.getContext('2d', {willReadFrequently:true}); g.drawImage(video, 0, 0, nw, nh); const img = g.getImageData(0,0,nw,nh); const gray = toGray(img.data); return {gray, w:nw, h:nh};
+  }
+
   async function grabFrameBlob(){
-    if(!stream){ return null; }
-    const track = stream.getVideoTracks()[0];
-    let blob=null;
-    if('ImageCapture' in window){
-      try {
-        const capture = new ImageCapture(track);
-        const bmp = await capture.grabFrame();
-        full.width = bmp.width; full.height = bmp.height;
-        full.getContext('2d').drawImage(bmp,0,0);
-        blob = await new Promise(res => full.toBlob(res, 'image/jpeg', 0.92));
-      } catch(e){ blob = null; }
-    }
-    if(!blob){
-      full.width = video.videoWidth; full.height = video.videoHeight;
-      full.getContext('2d').drawImage(video,0,0);
-      blob = await new Promise(res => full.toBlob(res, 'image/jpeg', 0.92));
-    }
+    if(!stream) return null; const track = stream.getVideoTracks()[0]; let blob=null;
+    if('ImageCapture' in window){ try { const capture = new ImageCapture(track); const bmp = await capture.grabFrame(); full.width = bmp.width; full.height = bmp.height; full.getContext('2d').drawImage(bmp,0,0); blob = await new Promise(res => full.toBlob(res, 'image/jpeg', 0.92)); } catch(e){ blob=null; } }
+    if(!blob){ full.width = video.videoWidth; full.height = video.videoHeight; full.getContext('2d').drawImage(video,0,0); blob = await new Promise(res => full.toBlob(res, 'image/jpeg', 0.92)); }
     return blob;
   }
 
-  async function validateBlob(blob){
+  async function validateBlob(blob, fromUpload){
     const bmp = await createImageBitmap(blob);
-    const maxSide = 512;
-    const scale = Math.max(bmp.width, bmp.height)/maxSide;
-    const nw = Math.max(1, Math.round(bmp.width/scale));
-    const nh = Math.max(1, Math.round(bmp.height/scale));
-    work.width = nw; work.height = nh;
-    const g = work.getContext('2d', { willReadFrequently:true });
-    g.drawImage(bmp, 0,0,nw,nh);
-    const img = g.getImageData(0,0,nw,nh);
-    const gray = toGray(img.data);
-    const vol = varianceOfLaplacian(gray, nw, nh);
-    const ten = tenengrad(gray, nw, nh);
-    const cold = volStats.n < 20 || tenStats.n < 20;
-    const pass = cold ? (vol > (+volTh.value||120) && ten > (+tenTh.value||8)) : (0.6*zscore(volStats,vol)+0.4*zscore(tenStats,ten) > 0);
-    return pass;
+    // Resolution sanity for readability: short side ≥ 1000 px
+    const shortSideOK = Math.min(bmp.width, bmp.height) >= 1000;
+    const maxSide = 512; const scale = Math.max(bmp.width, bmp.height)/maxSide; const nw = Math.max(1, Math.round(bmp.width/scale)); const nh = Math.max(1, Math.round(bmp.height/scale));
+    work.width = nw; work.height = nh; const g = work.getContext('2d', { willReadFrequently:true }); g.drawImage(bmp, 0,0,nw,nh);
+    const img = g.getImageData(0,0,nw,nh); const gray = toGray(img.data);
+
+    const vol = varianceOfLaplacian(gray, nw, nh); const ten = tenengrad(gray, nw, nh); const cold=false;
+    const blurPass = (vol > (+volTh.value||120) && ten > (+tenTh.value||8));
+    const {mean, pctLow, pctHigh} = luminanceStats(gray); const under = mean<70 || pctLow>0.20; const over = mean>180 || pctHigh>0.05; const expPass = !under && !over;
+    const glareArea = saturatedArea(gray)/(nw*nh); const glarePass = glareArea <= ((+glareTh.value)||0.03);
+    const illumRatio = illuminationRatio(gray, nw, nh, 31); const illumPass = illumRatio <= 2.5;
+    const doc = detectDocument(gray, nw, nh);
+    const coverage = doc ? polygonArea(doc.corners)/(nw*nh) : 0; const covPass = coverage >= ((+covTh.value)||0.8);
+    const skewPass = doc ? (anglesNearRight(doc.corners, (+skewTh.value)||12) && oppositeSideRatioOK(doc.corners, 1.4)) : false;
+
+    // Overall decision
+    return blurPass && expPass && glarePass && illumPass && covPass && skewPass && shortSideOK;
   }
 
-  function addThumb(blob){
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'capture.jpg'; a.title = 'Tap to download';
-    const img = document.createElement('img'); img.src = url; img.style.width='100%'; img.style.borderRadius='10px'; img.loading='lazy';
-    a.appendChild(img); thumbs.prepend(a);
-  }
-
+  function addThumb(blob){ const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=url; a.download='capture.jpg'; a.title='Download'; const img=document.createElement('img'); img.src=url; img.style.width='100%'; img.style.borderRadius='10px'; img.loading='lazy'; a.appendChild(img); thumbs.prepend(a); }
   function status(text, color){ statusTxt.textContent = text; statusPill.style.background = color; }
 
-  // === Sharpness metrics ===
-  function toGray(rgba){ const n = rgba.length/4; const out = new Uint8Array(n); for(let i=0,j=0;i<n;i++,j+=4){ out[i] = (0.2126*rgba[j] + 0.7152*rgba[j+1] + 0.0722*rgba[j+2])|0; } return out; }
+  // === Core metrics ===
+  function toGray(rgba){ const n=rgba.length/4; const out=new Uint8Array(n); for(let i=0,j=0;i<n;i++,j+=4){ out[i]=(0.2126*rgba[j] + 0.7152*rgba[j+1] + 0.0722*rgba[j+2])|0; } return out; }
+  function varianceOfLaplacian(gray,w,h){ const k=[0,1,0,1,-4,1,0,1,0]; let sum=0,sum2=0,n=0; for(let y=1;y<h-1;y++){ for(let x=1;x<w-1;x++){ let acc=0,ki=0; for(let dy=-1;dy<=1;dy++){ const row=(y+dy)*w; for(let dx=-1;dx<=1;dx++) acc += gray[row+(x+dx)]*k[ki++]; } sum+=acc; sum2+=acc*acc; n++; } } const m=sum/n; return (sum2/n)-m*m; }
+  function tenengrad(gray,w,h){ const sx=[-1,0,1,-2,0,2,-1,0,1], sy=[-1,-2,-1,0,0,0,1,2,1]; let sum=0,n=0; for(let y=1;y<h-1;y++){ for(let x=1;x<w-1;x++){ let gx=0,gy=0,ki=0; for(let dy=-1;dy<=1;dy++){ const row=(y+dy)*w; for(let dx=-1;dx<=1;dx++){ const p=gray[row+(x+dx)]; gx+=p*sx[ki]; gy+=p*sy[ki]; ki++; } } const g2=gx*gx+gy*gy; sum+=g2; n++; } } return sum/n; }
+  function luminanceStats(gray){ let sum=0,n=gray.length,lo=0,hi=0; for(let i=0;i<n;i++){ const v=gray[i]; sum+=v; if(v<10) lo++; if(v>245) hi++; } return {mean:sum/n, pctLow:lo/n, pctHigh:hi/n}; }
+  function saturatedArea(gray){ let c=0; for(let i=0;i<gray.length;i++) if(gray[i]>250) c++; return c; }
+  function illuminationRatio(gray,w,h,ksize){ // naive box blur stride
+    const k=Math.max(3,ksize|0), r=(k-1)/2|0; const out=new Float32Array(w*h);
+    // horizontal
+    for(let y=0;y<h;y++){
+      let acc=0; for(let x=0;x<w;x++){ const add=gray[y*w+Math.min(w-1,x+r)], rem=gray[y*w+Math.max(0,x-r-1)]; acc+=add-rem; out[y*w+x]=acc; }
+    }
+    // vertical + normalize to k*k
+    let minv=1e9, maxv=-1e9; const out2=new Float32Array(w*h);
+    for(let x=0;x<w;x++){
+      let acc=0; for(let y=0;y<h;y++){ const add=out[Math.min(h-1,y+r)*w+x], rem=out[Math.max(0,y-r-1)*w+x]; acc+=add-rem; const v=acc/(k*k); out2[y*w+x]=v; if(v<minv) minv=v; if(v>maxv) maxv=v; }
+    }
+    return (maxv+1e-6)/(minv+1e-6);
+  }
 
-  function varianceOfLaplacian(gray, w, h){ const k = [0,1,0, 1,-4,1, 0,1,0]; let sum=0, sum2=0, n=0; for(let y=1;y<h-1;y++){ for(let x=1;x<w-1;x++){ let acc=0, ki=0; for(let dy=-1; dy<=1; dy++){ const row=(y+dy)*w; for(let dx=-1; dx<=1; dx++) acc += gray[row + (x+dx)] * k[ki++]; } sum += acc; sum2 += acc*acc; n++; } } const mean = sum/n; return (sum2/n) - mean*mean; }
+  // === Document detection (edge map → extreme corners) ===
+  function detectDocument(gray,w,h){
+    // Sobel magnitude & threshold
+    const sx=[-1,0,1,-2,0,2,-1,0,1], sy=[-1,-2,-1,0,0,0,1,2,1];
+    const mag=new Float32Array(w*h); let maxg=0;
+    for(let y=1;y<h-1;y++){
+      for(let x=1;x<w-1;x++){
+        let gx=0,gy=0,ki=0; for(let dy=-1;dy<=1;dy++){ const row=(y+dy)*w; for(let dx=-1;dx<=1;dx++){ const p=gray[row+(x+dx)]; gx+=p*sx[ki]; gy+=p*sy[ki]; ki++; } }
+        const g=Math.hypot(gx,gy); mag[y*w+x]=g; if(g>maxg) maxg=g;
+      }
+    }
+    const th = maxg*0.25; // keep strongest edges
+    const pts=[]; for(let y=1;y<h-1;y++){ for(let x=1;x<w-1;x++){ if(mag[y*w+x]>=th) pts.push([x,y]); } }
+    if(pts.length<50) return null;
+    // Extreme points heuristic
+    let minSum=[0,0,1e9], maxSum=[0,0,-1e9], minDiff=[0,0,1e9], maxDiff=[0,0,-1e9];
+    for(const [x,y] of pts){ const s=x+y, d=x-y; if(s<minSum[2]) minSum=[x,y,s]; if(s>maxSum[2]) maxSum=[x,y,s]; if(d<minDiff[2]) minDiff=[x,y,d]; if(d>maxDiff[2]) maxDiff=[x,y,d]; }
+    const corners=[ [minSum[0],minSum[1]], [maxDiff[0],maxDiff[1]], [maxSum[0],maxSum[1]], [minDiff[0],minDiff[1]] ]; // TL, TR, BR, BL approx
+    // sanity: ensure clockwise order and inside image
+    if(!corners.every(([x,y])=>x>=0&&y>=0&&x<w&&y<h)) return null;
+    return { corners };
+  }
+  function polygonArea(c){ let a=0; for(let i=0;i<c.length;i++){ const [x1,y1]=c[i], [x2,y2]=c[(i+1)%c.length]; a += x1*y2 - x2*y1; } return Math.abs(a)/2; }
+  function anglesNearRight(c, tolDeg){
+    function angle(a,b,c){ const v1=[a[0]-b[0], a[1]-b[1]], v2=[c[0]-b[0], c[1]-b[1]]; const dot=v1[0]*v2[0]+v1[1]*v2[1]; const m1=Math.hypot(v1[0],v1[1]), m2=Math.hypot(v2[0],v2[1]); const cos=Math.max(-1, Math.min(1, dot/(m1*m2+1e-6))); return Math.acos(cos)*180/Math.PI; }
+    for(let i=0;i<4;i++){ const a=c[(i+3)%4], b=c[i], d=c[(i+1)%4]; const ang=angle(a,b,d); if(Math.abs(90-ang)>tolDeg) return false; } return true;
+  }
+  function oppositeSideRatioOK(c, maxRatio){ function len(p,q){ return Math.hypot(p[0]-q[0], p[1]-q[1]); } const ab=len(c[0],c[1]), bc=len(c[1],c[2]), cd=len(c[2],c[3]), da=len(c[3],c[0]); const r1=Math.max(ab,cd)/Math.max(1,Math.min(ab,cd)); const r2=Math.max(bc,da)/Math.max(1,Math.min(bc,da)); return r1<=maxRatio && r2<=maxRatio; }
 
-  function tenengrad(gray, w, h){ const sx=[-1,0,1,-2,0,2,-1,0,1]; const sy=[-1,-2,-1,0,0,0,1,2,1]; let sum=0, n=0; for(let y=1;y<h-1;y++){ for(let x=1;x<w-1;x++){ let gx=0, gy=0, ki=0; for(let dy=-1; dy<=1; dy++){ const row=(y+dy)*w; for(let dx=-1; dx<=1; dx++){ const p = gray[row + (x+dx)]; gx += p * sx[ki]; gy += p * sy[ki]; ki++; } } const g2 = gx*gx + gy*gy; sum += g2; n++; } } return sum/n; }
-
-  // Rolling z-score stats per metric (Welford)
-  const volStats = { n:0, mean:0, m2:0 };
-  const tenStats = { n:0, mean:0, m2:0 };
-  function zscore(stats, x){ stats.n++; const d = x - stats.mean; stats.mean += d / stats.n; const d2 = x - stats.mean; stats.m2 += d * d2; const v = (stats.n>1) ? (stats.m2 / (stats.n-1)) : 1e-6; const sd = Math.sqrt(Math.max(v, 1e-6)); return (x - stats.mean) / sd; }
+  // === Overlay drawing ===
+  function drawOverlay(corners, coverage, under, over, glareArea, illumRatio, score){
+    const g = overlay.getContext('2d'); const W=overlay.width, H=overlay.height; g.clearRect(0,0,W,H);
+    // target box ~85% of view
+    const target=0.85; const tw=W*target, th=H*target; const tx=(W-tw)/2, ty=(H-th)/2; g.strokeStyle='#ffffff66'; g.lineWidth=2; g.setLineDash([8,6]); g.strokeRect(tx,ty,tw,th); g.setLineDash([]);
+    if(corners){
+      // scale corners from analysis space to overlay space by using current video draw size
+      // Assumption: video fills overlay; mapping via ratios
+      const { w, h } = work; // last analysis size
+      const sx=W/w, sy=H/h; const cc=corners.map(([x,y])=>[x*sx,y*sy]);
+      g.lineWidth=3; g.strokeStyle= (coverage>=((+covTh.value)||0.8) ? '#16a34a' : '#ef4444'); g.beginPath(); g.moveTo(cc[0][0],cc[0][1]); for(let i=1;i<cc.length;i++) g.lineTo(cc[i][0],cc[i][1]); g.closePath(); g.stroke();
+      // corners
+      g.fillStyle=g.strokeStyle; for(const [x,y] of cc){ g.beginPath(); g.arc(x,y,4,0,Math.PI*2); g.fill(); }
+    }
+    // small HUD with quick flags
+    const hud=`exp:${under?'low':over?'high':'ok'}  glare:${(glareArea*100).toFixed(0)}%  illum:${illumRatio.toFixed(2)}  sharp:${score.toFixed(2)}`;
+    g.fillStyle='#00000080'; g.fillRect(8,H-28, g.measureText? (g.measureText(hud).width+16):240, 22);
+    g.fillStyle='#fff'; g.font='12px ui-monospace,monospace'; g.fillText(hud, 16, H-12);
+  }
 })();
 </script>
 </body>
